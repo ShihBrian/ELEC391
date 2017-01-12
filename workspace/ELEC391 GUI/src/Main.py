@@ -13,22 +13,19 @@ from matplotlib.patches import *
 from matplotlib import style
 
 style.use("ggplot")
-f = Figure(figsize=(7,7), dpi=100)
+f = Figure(figsize=(5.5,5.5), dpi=120)
 a = f.add_subplot(111)
 b = f.add_subplot(111)
-
-x=0
-y=0
+a.set_xlim([0,500])
+a.set_ylim([0,500])
 square=0
 circle=1
 
 def animate(i):
-    global x, y, square, circle
+    global square, circle
               
     a.clear()
-    a.set_xlim([0,500])
-    a.set_ylim([0,500])
-    a.plot(x, x, 'or')
+
     if square == 1: 
         b.add_patch(Rectangle((50,50),500,500,alpha = 0.5, hatch='\\'))
     elif circle == 1:
@@ -106,30 +103,30 @@ def close(event):
 
 def init_serial():
     ser = serial.Serial()
-    ser.baudrate = 115200
+    ser.baudrate = 57600
     ser.port = 'COM6'
     ser.timeout = 0
     ser.open()
     return ser
     
-def draw_square(x):
+def draw_square(integer):
     w.delete(all)
-    w.place(x=100+x,y=750-x)   
+    w.place(x=85+integer,y=725-integer)   
 
 def main():
-    global x
-    if ser.inWaiting()>0:
-        x = int(ser.readline().decode().strip())
+    integer=0
+    if ser.inWaiting()>2:
+        x = ser.read(3)   
         ser.flush()
-        print(x)
-    draw_square(x)
+        integer = int(x)
+        draw_square(integer)
     Gui.after(1,main)
 
 ser = init_serial()  
 Gui = myGui()
 w = tk.Canvas(Gui, bg = "blue", height=3, width=3, bd=1)
 Gui.bind('<Escape>', close)
-#ani = animation.FuncAnimation(f,animate, interval=1)
+ani = animation.FuncAnimation(f,animate, interval=500)
 Gui.after(1,main)
 Gui.mainloop()
 
