@@ -24,14 +24,11 @@ circle=1
 
 def animate(i):
     global x, y, square, circle
-    
-    x=x+2
-    y=y+2
-           
+              
     a.clear()
-    a.set_xlim([0,1000])
-    a.set_ylim([0,1000])
-    a.plot(x, y, 'or')
+    a.set_xlim([0,500])
+    a.set_ylim([0,500])
+    a.plot(x, x, 'or')
     if square == 1: 
         b.add_patch(Rectangle((50,50),500,500,alpha = 0.5, hatch='\\'))
     elif circle == 1:
@@ -107,14 +104,40 @@ def close(event):
     sys.exit()
 
 
+def init_serial():
+    ser = serial.Serial()
+    ser.baudrate = 115200
+    ser.port = 'COM6'
+    ser.timeout = 0
+    ser.open()
+    return ser
+    
+def draw_square(x):
+    w.delete(all)
+    w.place(x=100+x,y=750-x)   
+
+def main():
+    global x
+    if ser.inWaiting()>0:
+        x = int(ser.readline().decode().strip())
+        ser.flush()
+        print(x)
+    draw_square(x)
+    Gui.after(1,main)
+
+ser = init_serial()  
 Gui = myGui()
+w = tk.Canvas(Gui, bg = "blue", height=3, width=3, bd=1)
 Gui.bind('<Escape>', close)
-ani = animation.FuncAnimation(f,animate, interval=10)
+#ani = animation.FuncAnimation(f,animate, interval=1)
+Gui.after(1,main)
 Gui.mainloop()
-        
+
+     
 #enter values to reposition shapes
 #display information on side bar x,y for now
 #more shapes
 #images
-#custom shapes        
+#custom shapes
+#print adc, pin states, internal voltage, temp (if any are applicable)        
         
