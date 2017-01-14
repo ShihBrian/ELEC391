@@ -1,5 +1,6 @@
 import sys
 import tkinter as tk
+from tkinter import *
 from tkinter import ttk
 import matplotlib
 matplotlib.use("TkAgg")
@@ -20,6 +21,15 @@ a.set_xlim([0,500])
 a.set_ylim([0,500])
 square=0
 circle=1
+idx = 0
+rcvBuf = [0]*6
+state = 0
+nxtstate = 0
+changestate = False
+success_count = 0
+fail_count = 0
+x_coord = 0
+y_coord = 0
 
 def animate(i):
     global square, circle
@@ -46,7 +56,7 @@ class myGui(tk.Tk):
         
         self.frames = {}
         
-        for F in (MainPage, DataPage):
+        for F in (MainPage):
             
             frame = F(container,self)
             
@@ -75,7 +85,6 @@ class MainPage(tk.Frame):
         tk.Frame.__init__(self,parent)
         
         button1 = ttk.Button(self, text="Main Page").place(x=0,y=0)
-        button2 = ttk.Button(self, text="Data Page", command=lambda: controller.show_frame(DataPage)).place(x=75, y=0)
         button3 = ttk.Button(self, text="Square", command=lambda: setshape(1)).place(x=0,y=100)
         button4 = ttk.Button(self, text="Circle", command=lambda: setshape(2)).place(x=75,y=100)
         
@@ -87,14 +96,7 @@ class MainPage(tk.Frame):
         toolbar.update()
         canvas._tkcanvas.place(x=0,y=150)
         
-        
-class DataPage(tk.Frame):
-    
-    def __init__(self, parent, controller):
-        tk.Frame.__init__(self,parent)
-
-        button1 = ttk.Button(self, text="Main Page", command=lambda: controller.show_frame(MainPage)).grid(row=1, column=1, sticky="nsew")
-        button2 = ttk.Button(self, text="Data Page").grid(row=1, column=2, sticky="nsew")
+        Label(self, text="Failed Receive").place(x=700,y=300)
 
 def close(event):
     Gui.withdraw()
@@ -109,17 +111,43 @@ def init_serial():
     ser.open()
     return ser
     
-def draw_square(integer):
+def draw_square(x_coord,y_coord):
     w.delete(all)
-    w.place(x=85+integer,y=725-integer)   
+    w.place(x=85+x_coord,y=725-y_coord)   
 
 def main():
-    integer=0
-    if ser.inWaiting()>2:
-        x = ser.read(3)   
-        ser.flush()
-        integer = int(x)
-        draw_square(integer)
+    global idx, rcvBuf, state, nextstate, changestate, success_count, fail_count, x_coord, y_coord
+
+    if ser.inWaiting()>0:
+        x = int(ser.read(3),16)
+        if state == 0: #waiting to receive startbyte
+            if x == 255: #received startbyte
+                changestate = True
+                nextstate = 1
+        elif state == 1: #receive x coord
+            rcvBuf[0] = x
+            changestate = True
+            nextstate = 2
+        elif state == 2: #receive y coord
+            rcvBuf[1] = x
+            changestate = True
+            nextstate = 3
+        elif state == 3: #should receive endbyte
+            if x == 254: #if endbyte is received then update x,y coordinate
+                success_count = success_count + 1
+                x_coord = rcvBuf[0]
+                y_coord = rcvBuf[1]
+            else: #else discard bytes and change state back to waiting for startbyte
+                fail_count = fail_count + 1
+            changestate = True
+            nextstate = 0
+            
+        if changestate:
+            state = nextstate
+
+        draw_square(x_coord, y_coord)
+        
+        
     Gui.after(1,main)
 
 ser = init_serial()  
@@ -127,10 +155,14 @@ Gui = myGui()
 w = tk.Canvas(Gui, bg = "blue", height=3, width=3, bd=1)
 Gui.bind('<Escape>', close)
 ani = animation.FuncAnimation(f,animate, interval=500)
+
 Gui.after(1,main)
+
 Gui.mainloop()
 
-     
+#dont want to use tk.canvas to display point. ideally want to use matplotlib function but too laggy right now
+#fix scaling issues
+#pause screen update     
 #enter values to reposition shapes
 #display information on side bar x,y for now
 #more shapes
