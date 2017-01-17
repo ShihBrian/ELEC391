@@ -36,7 +36,7 @@ class StatusBar(Frame):
 
     def __init__(self, master):
         Frame.__init__(self, master)
-        self.label = Label(self, bd=1, anchor=W, relief="solid", borderwidth =2, font=("Courier", 20), width = 5)
+        self.label = Label(self, bd=1, anchor=W, relief="solid", borderwidth =2, font=("Courier", 20), width = 6)
         self.label.pack()
 
     def set(self, format, *args):
@@ -62,11 +62,11 @@ def init_serial():
 def draw_point(x,y):
     global rect
     w.delete(rect)
-    rect = w.create_rectangle(x-1,507-y-1,x+3,507-y+3, fill="blue")
+    rect = w.create_rectangle(x-1,507-y-1,x+3,507-y+3, fill="blue", outline="")
 
 def main():
     global idx, rcvBuf, state, nextstate, changestate, success_count, fail_count, x_coord, y_coord
-    
+    fail_percent = 0.0
     if ser.inWaiting()>0:
         x = int(ser.read(3),16)
         if state == 0: #waiting to receive startbyte
@@ -95,11 +95,13 @@ def main():
         if changestate:
             state = nextstate
         
-         
+        if(success_count):
+            fail_percent = fail_count/(fail_count+success_count) 
         stRcvFail.set("%d", fail_count)
         stRcvSuccess.set("%d", success_count)
         stXCoord.set("%d", x_coord)
         stYCoord.set("%d", y_coord)
+        stFailPercent.set("%.2f", fail_percent*100)
         
     root.after(1,main)
     
@@ -117,12 +119,19 @@ stRcvFail = StatusBar(root)
 stRcvSuccess = StatusBar(root)
 stXCoord = StatusBar(root)
 stYCoord = StatusBar(root)
-stRcvFail.place(x=800,y=600)
-stRcvSuccess.place(x=800,y=640)
-stXCoord.place(x=800,y=680)
-stYCoord.place(x=800,y=720)
+stRcvFail.place(x=850,y=600)
+stRcvSuccess.place(x=850,y=640)
+stFailPercent = StatusBar(root)
+stFailPercent.place(x=850,y=680)
+stXCoord.place(x=850,y=720)
+stYCoord.place(x=850,y=760)
 ttk.Button(root, text="Square", command=lambda: draw_constraint(1)).place(x=0,y=100)
 ttk.Button(root, text="Circle", command=lambda: draw_constraint(2)).place(x=75,y=100)
+Label(root, text="Rx Fail", font=("Courier", 20)).place(x=700,y=600)
+Label(root, text="Rx Success", font=("Courier", 18)).place(x=700,y=640)
+Label(root, text="Fail %", font=("Courier", 20)).place(x=700,y=680)
+Label(root, text="X Pos", font=("Courier", 20)).place(x=700,y=720)
+Label(root, text="Y Pos", font=("Courier", 20)).place(x=700,y=760)
 w = Canvas(root, width=508, height=507, highlightthickness = 0)
 w.place(x=85,y=215)
 rect = w.create_rectangle(250,250,253,253, fill="blue")
@@ -140,4 +149,5 @@ root.mainloop()
 #print adc, pin states, internal voltage, temp (if any are applicable)      
 #add length option in receive protocol  
 #handshake
+#display extension length of actuator
         
