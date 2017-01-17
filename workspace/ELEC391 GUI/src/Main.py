@@ -14,13 +14,12 @@ from matplotlib.patches import *
 from matplotlib import style
 
 style.use("ggplot")
-f = Figure(figsize=(5.5,5.5), dpi=120)
+f = Figure(figsize=(5.5,5.3), dpi=120)
 a = f.add_subplot(111)
 b = f.add_subplot(111)
-a.set_xlim([0,500])
-a.set_ylim([0,500])
-square=0
-circle=1
+b.add_patch(Rectangle((50,50),55,55,alpha = 0.5, hatch='\\'))
+a.set_xlim([0,250])
+a.set_ylim([0,250])
 idx = 0
 rcvBuf = [0]*6
 state = 0
@@ -30,79 +29,28 @@ success_count = 0
 fail_count = 0
 x_coord = 0
 y_coord = 0
+square=0
+circle=1
 
-def animate(i):
-    global square, circle
-              
-    a.clear()
+class StatusBar(Frame):
 
-    if square == 1: 
-        b.add_patch(Rectangle((50,50),500,500,alpha = 0.5, hatch='\\'))
-    elif circle == 1:
-        b.add_patch(Circle((250,250), 100, alpha = 0.5, hatch = '\\'))
-        
-class myGui(tk.Tk):
-    
-    def __init__(self):
-        tk.Tk.__init__(self)
-        self.geometry('1000x900+100+80')
-        tk.Tk.wm_title(self, "ELEC 391 Gui")
-        container = tk.Frame(self)
-        
-        container.pack(side="top", fill="both", expand = True)
+    def __init__(self, master):
+        Frame.__init__(self, master)
+        self.label = Label(self, bd=1, anchor=W, relief="solid", borderwidth =2, font=("Courier", 20), width = 5)
+        self.label.pack()
 
-        container.grid_rowconfigure(0, weight = 1)
-        container.grid_columnconfigure(0, weight = 1)
-        
-        self.frames = {}
-        
-        for F in (MainPage):
-            
-            frame = F(container,self)
-            
-            self.frames[F] = frame
-            
-            frame.grid(row=0, column = 0, sticky="nsew")
-        
-        self.show_frame(MainPage)
-        
-    def show_frame(self,cont):
-        frame = self.frames[cont]
-        frame.tkraise()
+    def set(self, format, *args):
+        self.label.config(text=format % args)
+        self.label.update_idletasks()
 
-def setshape(shape):
-    global circle, square
+    def clear(self):
+        self.label.config(text="")
+        self.label.update_idletasks()
+
+def draw_constraint(shape): 
     if shape == 1:
-        square = 1
-        circle = 0
-    elif shape == 2:
-        circle = 1
-        square = 0
+        w.create_oval(240,240,260,260, fill="green")
         
-class MainPage(tk.Frame):
-    
-    def __init__(self, parent, controller):
-        tk.Frame.__init__(self,parent)
-        
-        button1 = ttk.Button(self, text="Main Page").place(x=0,y=0)
-        button3 = ttk.Button(self, text="Square", command=lambda: setshape(1)).place(x=0,y=100)
-        button4 = ttk.Button(self, text="Circle", command=lambda: setshape(2)).place(x=75,y=100)
-        
-        canvas = FigureCanvasTkAgg(f, self)
-        canvas.show()
-        canvas.get_tk_widget().place(x=0,y=200)
-        
-        toolbar = NavigationToolbar2TkAgg(canvas, self)
-        toolbar.update()
-        canvas._tkcanvas.place(x=0,y=150)
-        
-        Label(self, text="Failed Receive").place(x=700,y=300)
-
-def close(event):
-    Gui.withdraw()
-    sys.exit()
-
-
 def init_serial():
     ser = serial.Serial()
     ser.baudrate = 57600
@@ -110,14 +58,15 @@ def init_serial():
     ser.timeout = 0
     ser.open()
     return ser
-    
-def draw_square(x_coord,y_coord):
-    w.delete(all)
-    w.place(x=85+x_coord,y=725-y_coord)   
+
+def draw_point(x,y):
+    global rect
+    w.delete(rect)
+    rect = w.create_rectangle(x-1,507-y-1,x+3,507-y+3, fill="blue")
 
 def main():
     global idx, rcvBuf, state, nextstate, changestate, success_count, fail_count, x_coord, y_coord
-
+    
     if ser.inWaiting()>0:
         x = int(ser.read(3),16)
         if state == 0: #waiting to receive startbyte
@@ -137,6 +86,7 @@ def main():
                 success_count = success_count + 1
                 x_coord = rcvBuf[0]
                 y_coord = rcvBuf[1]
+                draw_point(x_coord*2,y_coord*2)  
             else: #else discard bytes and change state back to waiting for startbyte
                 fail_count = fail_count + 1
             changestate = True
@@ -144,21 +94,40 @@ def main():
             
         if changestate:
             state = nextstate
-
-        draw_square(x_coord, y_coord)
         
+         
+        stRcvFail.set("%d", fail_count)
+        stRcvSuccess.set("%d", success_count)
+        stXCoord.set("%d", x_coord)
+        stYCoord.set("%d", y_coord)
         
-    Gui.after(1,main)
-
+    root.after(1,main)
+    
 ser = init_serial()  
-Gui = myGui()
-w = tk.Canvas(Gui, bg = "blue", height=3, width=3, bd=1)
-Gui.bind('<Escape>', close)
-ani = animation.FuncAnimation(f,animate, interval=500)
-
-Gui.after(1,main)
-
-Gui.mainloop()
+root = Tk()
+root.geometry('1600x900+100+80')
+tk.Tk.wm_title(root, "TEST")
+canvas = FigureCanvasTkAgg(f, root)
+canvas.show()
+canvas.get_tk_widget().place(x=0,y=200)
+toolbar = NavigationToolbar2TkAgg(canvas, root)
+toolbar.update()
+canvas._tkcanvas.place(x=0,y=150)
+stRcvFail = StatusBar(root)
+stRcvSuccess = StatusBar(root)
+stXCoord = StatusBar(root)
+stYCoord = StatusBar(root)
+stRcvFail.place(x=800,y=600)
+stRcvSuccess.place(x=800,y=640)
+stXCoord.place(x=800,y=680)
+stYCoord.place(x=800,y=720)
+ttk.Button(root, text="Square", command=lambda: draw_constraint(1)).place(x=0,y=100)
+ttk.Button(root, text="Circle", command=lambda: draw_constraint(2)).place(x=75,y=100)
+w = Canvas(root, width=508, height=507, highlightthickness = 0)
+w.place(x=85,y=215)
+rect = w.create_rectangle(250,250,253,253, fill="blue")
+root.after(1,main)
+root.mainloop()
 
 #dont want to use tk.canvas to display point. ideally want to use matplotlib function but too laggy right now
 #fix scaling issues
@@ -168,5 +137,7 @@ Gui.mainloop()
 #more shapes
 #images
 #custom shapes
-#print adc, pin states, internal voltage, temp (if any are applicable)        
+#print adc, pin states, internal voltage, temp (if any are applicable)      
+#add length option in receive protocol  
+#handshake
         
