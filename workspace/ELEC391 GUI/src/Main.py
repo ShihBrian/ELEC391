@@ -11,11 +11,16 @@ from matplotlib.figure import Figure
 import matplotlib.animation as animation
 from matplotlib.patches import *
 from enum import Enum
-import struct
 from matplotlib import style
+import time
+
+start_time = time.time()
+
+wHeight = 508
+wWidth = 501
 
 style.use("ggplot")
-f = Figure(figsize=(5.5,5.3), dpi=120)
+f = Figure(figsize=(5.4,5.3), dpi=120)
 a = f.add_subplot(111)
 b = f.add_subplot(111)
 a.set_xlim([0,250])
@@ -28,6 +33,7 @@ fail_count = 0
 x_coord = 0
 y_coord = 0
 pause = 0
+
 class States(Enum):
     RxStart = 1
     RxXCoord = 2
@@ -36,6 +42,12 @@ class States(Enum):
 
 state = States.RxStart
 nxtstate = States.RxStart
+
+sqX=100
+sqY=100
+sqL=50
+sqH=50
+
 
 class StatusBar(Frame):
 
@@ -53,15 +65,59 @@ class StatusBar(Frame):
         self.label.update_idletasks()
 
 def draw_constraint(shape): 
-    global square, oval
-    w.delete(square)
-    w.delete(oval)
+    global sqX, sqY, sqL, sqH
+    w.delete(ALL)
     if shape == 1:
-        square = w.create_rectangle(150,150,350,350, fill="lightblue")
+        w.create_rectangle(sqX*(wWidth/250),wHeight-sqY*(wHeight/250),(sqX+sqL)*(wWidth/250), wHeight-(sqY+sqH)*(wHeight/250), fill="lightblue")
+        create_entry(1)
     if shape == 2:
-        oval = w.create_oval(150,150,350,350, fill="lightblue")
+        w.create_oval(150,150,350,350, fill="lightblue")
 
-        
+bOnce = 1;
+bOnce2 = 1;
+def rectIntersect(pX, pY):
+    global sqX, sqY, sqH, sqL, bOnce, bOnce2
+    cTRx = sqX+sqL
+    CBLy = sqY+sqH
+    
+    if (pX >= sqX and pX <= cTRx) and (pY >= sqY and pY <= CBLy):
+        if bOnce:
+            bOnce2 = 1
+            ser.write(b"\xFF")
+            bOnce = 0
+    else:
+        if bOnce2:
+            if start_time+1 < time.time():
+                bOnce = 1
+                ser.write("1".encode())
+                bOnce2 = 0
+            
+def create_entry(shape):
+    def entry_callback():
+        global sqX, sqY, sqH, sqL
+        sqX = int(entryX.get())
+        sqY = int(entryY.get())
+        sqL = int(entryLength.get())
+        sqH = int(entryHeight.get())
+        draw_constraint(shape)     
+    b=Button(root, text="Set", width = 10, command=entry_callback)
+    b.place(x=680, y=280)
+    if shape == 1:
+        entryX = Entry(root, width = 5)
+        entryX.place(x=760,y=200)
+        entryY = Entry(root, width = 5)
+        entryY.place(x=800,y=200)
+        XYLabel = Label(root, text="Bottom Left X,Y")
+        XYLabel.place(x=660,y=200)
+        entryLength = Entry(root, width = 5)
+        entryLength.place(x=760, y=225)
+        LengthLabel = Label(root, text="Length")
+        LengthLabel.place(x=660,y=225)
+        entryHeight = Entry(root, width = 5)
+        entryHeight.place(x=760, y=250)
+        WidthLabel = Label(root, text="Height")
+        WidthLabel.place(x=660,y=250)     
+  
 def init_serial():
     ser = serial.Serial()
     ser.baudrate = 57600
@@ -77,21 +133,18 @@ def draw_point(x,y):
         rect = w.create_rectangle(x-1,507-y-1,x+3,507-y+3, fill="blue", outline="")
 
 def pause_update():
-    global pause
-    if pause:
-        pause = 0
-    else:
-        pause = 1
+    ser.write(b"\xFE")
 
 def create_buttons(root):
     ttk.Button(root, text="Square", command=lambda: draw_constraint(1)).place(x=0,y=0)
     ttk.Button(root, text="Circle", command=lambda: draw_constraint(2)).place(x=75,y=0)
     ttk.Button(root, text="Pause", command=lambda: pause_update()).place(x=500,y=0)
+    ttk.Button(root, text="Clear", command=lambda: clear()).place(x=575,y=0)
 
 def create_labels(root):
-    Label(root, text="Rx Count", font=("Courier", 18)).place(x=660,y=30)
-    Label(root, text="X Pos", font=("Courier", 20)).place(x=660,y=60)
-    Label(root, text="Y Pos", font=("Courier", 20)).place(x=660,y=90)
+    Label(root, text="Rx Count", font=("Courier", 18)).place(x=660,y=10)
+    Label(root, text="X Pos", font=("Courier", 20)).place(x=660,y=40)
+    Label(root, text="Y Pos", font=("Courier", 20)).place(x=660,y=70)
     
 def init_window():
     root = Tk()
@@ -102,9 +155,18 @@ def init_window():
     canvas.get_tk_widget().place(x=0,y=100)
     toolbar = NavigationToolbar2TkAgg(canvas, root)
     toolbar.update()
-    canvas._tkcanvas.place(x=0,y=25)
+    canvas._tkcanvas.place(x=0,y=35)
     return root
-        
+
+def clear():
+    global square, sqX, sqY, sqH, sqL
+    sqX = sqY = 100
+    sqH = sqL = 50
+    w.delete(ALL)
+   
+def close(event):
+    sys.exit()
+         
 def main():
     global idx, rcvBuf, state, nextstate, changestate, success_count, x_coord, y_coord, pause
 
@@ -140,13 +202,14 @@ def main():
         state = nextstate
 #-----------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------
-
-    if pause == 0:
-        stRcvSuccess.set("%d", success_count)
-        stXCoord.set("%d", x_coord)
-        stYCoord.set("%d", y_coord)
-        
+    stRcvSuccess.set("%d", success_count)
+    stXCoord.set("%d", x_coord)
+    stYCoord.set("%d", y_coord)
+    rectIntersect(x_coord, y_coord)
+    
     root.after(1,main)
+
+
 
 #-----------------------------------------------------------------------------------------    
 #-------------------------Initialization---------------------------------
@@ -158,25 +221,16 @@ create_labels(root)
 stRcvSuccess = StatusBar(root)
 stXCoord = StatusBar(root)
 stYCoord = StatusBar(root)
-stRcvSuccess.place(x=780,y=30)
-stXCoord.place(x=780,y=60)
-stYCoord.place(x=780,y=90)
-w = Canvas(root, width=508, height=507, highlightthickness = 0)
-w.place(x=85,y=90)
-rect = w.create_rectangle(250,250,253,253, fill="blue")
-square = w.create_rectangle(0,0,0,0) #initialize object
-oval = w.create_oval(0,0,0,0) #initialize object
-
-entry = Entry(root, width = 5)
-entry.place(x=750, y=200)
-entry.focus_set()
-def entry_callback():
-    print (entry.get())
-b=Button(root, text="get", width = 10, command=entry_callback)
-b.place(x=750, y=250)
+stRcvSuccess.place(x=780,y=10)
+stXCoord.place(x=780,y=40)
+stYCoord.place(x=780,y=70)
+w = Canvas(root, width=wWidth, height=wHeight, highlightthickness = 0)
+w.place(x=82,y=98)
+rect = w.create_rectangle(0,0,0,0, fill="blue")
+create_entry(1)
 #-----------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------
-
+root.bind('<Escape>', close)
 root.after(1,main)
 root.mainloop()
 

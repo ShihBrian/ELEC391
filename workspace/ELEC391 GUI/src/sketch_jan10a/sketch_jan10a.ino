@@ -33,17 +33,19 @@ unsigned int startbyte = 0xFF;
 unsigned int endbyte = 0xFE;
 int dx = 1;
 int dy = 0;
+bool pause = false;
 
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(57600);
+  Serial.setTimeout(10);
   pinMode(ENCODERAPIN, INPUT);
   pinMode(ENCODERBPIN, INPUT);
   pinMode(LEDPin, OUTPUT);
   attachInterrupt(0,ISR_GPIO, RISING);
   while(!Serial){
   }
-  delay(1000);
+  delay(100);
 }
 
 void Add_Padding(int padding, unsigned int data)
@@ -76,11 +78,11 @@ void Send_Data(int value)
       Add_Padding(0,value ); 
     }  
 }
-
-void test_pattern()
+int move_speed = 1;
+void test_pattern(int move_speed)
 {
-    x += dx;
-    y += dy;
+    x += dx*move_speed;
+    y += dy*move_speed;
     if (x == 240 && y == 10){
       dx = 0;
       dy = 1;
@@ -98,49 +100,36 @@ void test_pattern()
       dy = 0;
     }      
 }
-
+unsigned int incomingByte = 0;
 void loop() {
   curr_tick = millis();
-  /*if(curr_tick-tickms >= tick_start){
-    Send_Data(startbyte);
-    Send_Data(x);
-    Send_Data(y);
-    Send_Data(endbyte);  
-    tick_start = millis();
-    test_pattern();
-  }*/
-  curr_time = millis();
-  if(previousPos != encoderPos){
-    if(curr_time-deltaT >= start_time){
-      if(old_angle > angle && currentdirection == CLOCKWISE){
-        curr_vel = ((angle + (360 - (old_angle)))/deltaT)*scale; 
-      }
-      else if(old_angle < angle && currentdirection == COUNTERCLOCKWISE){
-        curr_vel = ((angle - (360 + (old_angle)))/deltaT)*scale; 
-      }
-      else{
-        curr_vel = ((angle - old_angle)/deltaT)*scale;
-      }
-
-      accel = ((abs(curr_vel) - abs(old_vel))/deltaT)*scale;
-      
-      Serial.print(angle);
-      Serial.print("\t");
-      Serial.print(old_angle);
-      Serial.print("\t");
-      Serial.print(curr_vel); //degrees/second
-      Serial.print("\t");
-      Serial.print(old_vel);
-      Serial.print("\t");
-      Serial.println(accel); //degrees/second^2
-      previousPos = encoderPos;
-      old_angle = angle;
-      old_vel = curr_vel;
-      start_time = millis();
+  if(!pause){
+    if(curr_tick-tickms >= tick_start){
+      Send_Data(startbyte);
+      Send_Data(x);
+      Send_Data(y);
+      Send_Data(endbyte);  
+      tick_start = millis();
+      test_pattern(move_speed);
     }
   }
-}
 
+  if(Serial.available()>0){
+    incomingByte = Serial.read();
+    if(incomingByte == 0xFF)
+      move_speed = 0;
+    else if(incomingByte == '1'){
+      move_speed = incomingByte-48;
+    }
+    else if(incomingByte == 0xFE){
+      pause = !pause;
+    }
+  }
+  /*if(encoderPos != previousPos){
+    Serial.print(angle);
+    previousPos = encoderPos;
+  }*/
+}
 void ISR_GPIO()
 {
   // read both inputs
@@ -169,3 +158,5 @@ void ISR_GPIO()
   // track the number of interrupts
   interruptsReceived++;
 }
+
+
