@@ -18,6 +18,9 @@ start_time = time.time()
 
 wHeight = 508
 wWidth = 501
+x_old = 0
+y_old = 0
+
 
 style.use("ggplot")
 f = Figure(figsize=(5.4,5.3), dpi=120)
@@ -47,7 +50,6 @@ sqX=100
 sqY=100
 sqL=50
 sqH=50
-
 
 class StatusBar(Frame):
 
@@ -117,24 +119,7 @@ def create_entry(shape):
         entryHeight.place(x=760, y=250)
         WidthLabel = Label(root, text="Height")
         WidthLabel.place(x=660,y=250)     
-  
-def init_serial():
-    ser = serial.Serial()
-    ser.baudrate = 57600
-    ser.port = 'COM6'
-    ser.timeout = 1
-    ser.open()
-    return ser
-
-def draw_point(x,y):
-    global rect, pause
-    if pause == 0:
-        w.delete(rect)
-        rect = w.create_rectangle(x-1,507-y-1,x+3,507-y+3, fill="blue", outline="")
-
-def pause_update():
-    ser.write(b"\xFE")
-
+        
 def create_buttons(root):
     ttk.Button(root, text="Square", command=lambda: draw_constraint(1)).place(x=0,y=0)
     ttk.Button(root, text="Circle", command=lambda: draw_constraint(2)).place(x=75,y=0)
@@ -156,7 +141,24 @@ def init_window():
     toolbar = NavigationToolbar2TkAgg(canvas, root)
     toolbar.update()
     canvas._tkcanvas.place(x=0,y=35)
-    return root
+    return root 
+ 
+def init_serial():
+    ser = serial.Serial()
+    ser.baudrate = 57600
+    ser.port = 'COM6'
+    ser.timeout = 1
+    ser.open()
+    return ser
+
+def draw_point(x,y):
+    global rect, pause
+    if pause == 0:
+        w.delete(rect)
+        rect = w.create_rectangle(x-1,507-y-1,x+3,507-y+3, fill="blue", outline="")
+
+def pause_update():
+    ser.write(b"\xFE")
 
 def clear():
     global square, sqX, sqY, sqH, sqL
@@ -168,11 +170,10 @@ def close(event):
     sys.exit()
          
 def main():
-    global idx, rcvBuf, state, nextstate, changestate, success_count, x_coord, y_coord, pause
-
-#-----------------------------------------------------------------------------------------    
-#-------------------------Transfer Protocol State Machine---------------------------------
-#-----------------------------------------------------------------------------------------
+    global idx, rcvBuf, state, nextstate, changestate, success_count, x_coord, y_coord, x_old, y_old
+    #-----------------------------------------------------------------------------------------    
+    #-------------------------Transfer Protocol State Machine---------------------------------
+    #-----------------------------------------------------------------------------------------
     if ser.inWaiting()>0:
         x = int(ser.read(3),16)
 
@@ -193,23 +194,24 @@ def main():
                 success_count = success_count + 1
                 x_coord = rcvBuf[0]
                 y_coord = rcvBuf[1]
-                draw_point(x_coord*2,y_coord*2)  
+                if x_old != x_coord or y_old != y_coord:
+                    draw_point(x_coord*2,y_coord*2)  
+                    x_old = x_coord
+                    y_old = y_coord
             #else discard bytes and change state back to waiting for startbyte
             changestate = True
             nextstate = States.RxStart
                 
     if changestate:
         state = nextstate
-#-----------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------
+    #-----------------------------------------------------------------------------------------
+    #-----------------------------------------------------------------------------------------
     stRcvSuccess.set("%d", success_count)
     stXCoord.set("%d", x_coord)
     stYCoord.set("%d", y_coord)
     rectIntersect(x_coord, y_coord)
     
     root.after(1,main)
-
-
 
 #-----------------------------------------------------------------------------------------    
 #-------------------------Initialization---------------------------------
@@ -234,15 +236,12 @@ root.bind('<Escape>', close)
 root.after(1,main)
 root.mainloop()
 
-#dont want to use tk.canvas to display point. ideally want to use matplotlib function but too laggy right now
-#fix scaling issues    
-#enter values to reposition shapes
-#display information on side bar x,y for now
 #more shapes
 #images
 #custom shapes
 #print adc, pin states, internal voltage, temp (if any are applicable)      
 #add length option in receive protocol  
-#handshake
 #display extension length of actuator
+#multiple shapes
+#bind keys to do something
         

@@ -1,6 +1,7 @@
 #include <SoftwareSerial.h>
 #define LEDPin 13
-
+#define OutputPin 4
+#define sendEncoder
 SoftwareSerial mySerial(10,11);
 /*===============================*/
 //Globals for optical encoder
@@ -15,13 +16,15 @@ short currentdirection = CLOCKWISE;
 long previousPos = 0;
 volatile double angle = 0.0;
 volatile double old_angle = 0.0;
-double curr_vel;
-double old_vel = 0.0;
 unsigned long curr_time;
 unsigned long start_time = millis();
-double deltaT = 10.0; //ms
-double accel;
-double scale = 1/(deltaT/1000);
+/*===============================*/
+
+/*===============================*/
+//Communication globals
+unsigned int startbyte = 0xFF;
+unsigned int endbyte = 0xFE;
+unsigned int incomingByte = 0;
 /*===============================*/
 
 unsigned long tick_start = millis();
@@ -29,12 +32,13 @@ unsigned long tickms = 10;
 unsigned long curr_tick;
 int x = 10;
 int y = 10;
-unsigned int startbyte = 0xFF;
-unsigned int endbyte = 0xFE;
 int dx = 1;
 int dy = 0;
+int move_speed = 1;
 bool pause = false;
-
+int thresholdPos = 0;
+bool intersect = false;
+int direc = CLOCKWISE;
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(57600);
@@ -42,6 +46,7 @@ void setup() {
   pinMode(ENCODERAPIN, INPUT);
   pinMode(ENCODERBPIN, INPUT);
   pinMode(LEDPin, OUTPUT);
+  pinMode(OutputPin, OUTPUT);
   attachInterrupt(0,ISR_GPIO, RISING);
   while(!Serial){
   }
@@ -78,7 +83,7 @@ void Send_Data(int value)
       Add_Padding(0,value ); 
     }  
 }
-int move_speed = 1;
+
 void test_pattern(int move_speed)
 {
     x += dx*move_speed;
@@ -100,14 +105,18 @@ void test_pattern(int move_speed)
       dy = 0;
     }      
 }
-unsigned int incomingByte = 0;
 void loop() {
   curr_tick = millis();
   if(!pause){
     if(curr_tick-tickms >= tick_start){
       Send_Data(startbyte);
+#ifndef sendEncoder
       Send_Data(x);
       Send_Data(y);
+#else
+      Send_Data(encoderPos+125);
+      Send_Data(10);
+#endif
       Send_Data(endbyte);  
       tick_start = millis();
       test_pattern(move_speed);
@@ -116,19 +125,34 @@ void loop() {
 
   if(Serial.available()>0){
     incomingByte = Serial.read();
-    if(incomingByte == 0xFF)
+    if(incomingByte == 0xFF){
       move_speed = 0;
+      thresholdPos = encoderPos;
+      intersect = true;
+      direc = currentdirection;
+    }
     else if(incomingByte == '1'){
       move_speed = incomingByte-48;
+      thresholdPos = 0;
+      intersect = false;
     }
     else if(incomingByte == 0xFE){
       pause = !pause;
     }
   }
-  /*if(encoderPos != previousPos){
-    Serial.print(angle);
-    previousPos = encoderPos;
-  }*/
+  if(intersect){
+    if(direc == COUNTERCLOCKWISE){
+      if(!(encoderPos-thresholdPos>0))
+        analogWrite(OutputPin, (-1*(encoderPos-thresholdPos)*12)<255 ? (-1*(encoderPos-thresholdPos)*12) : 255 );
+    }
+    else{
+      if(!(encoderPos-thresholdPos<0))
+        analogWrite(OutputPin, ((encoderPos-thresholdPos)*12)<255 ? ((encoderPos-thresholdPos)*12) : 255 );
+    }
+  }
+  else{
+    analogWrite(OutputPin, 0);
+  }
 }
 void ISR_GPIO()
 {
