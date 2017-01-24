@@ -105,6 +105,8 @@ void test_pattern(int move_speed)
       dy = 0;
     }      
 }
+
+int PowerLevel = 0;
 void loop() {
   curr_tick = millis();
   if(!pause){
@@ -131,7 +133,7 @@ void loop() {
       intersect = true;
       direc = currentdirection;
     }
-    else if(incomingByte == '1'){
+    else if(incomingByte == 0xFD){
       move_speed = incomingByte-48;
       thresholdPos = 0;
       intersect = false;
@@ -139,16 +141,12 @@ void loop() {
     else if(incomingByte == 0xFE){
       pause = !pause;
     }
+    if(intersect)
+      PowerLevel = incomingByte-47;
+    
   }
   if(intersect){
-    if(direc == COUNTERCLOCKWISE){
-      if(!(encoderPos-thresholdPos>0))
-        analogWrite(OutputPin, (-1*(encoderPos-thresholdPos)*12)<255 ? (-1*(encoderPos-thresholdPos)*12) : 255 );
-    }
-    else{
-      if(!(encoderPos-thresholdPos<0))
-        analogWrite(OutputPin, ((encoderPos-thresholdPos)*12)<255 ? ((encoderPos-thresholdPos)*12) : 255 );
-    }
+    analogWrite(OutputPin, PowerLevel*25<=255 ? PowerLevel*25 : 255);
   }
   else{
     analogWrite(OutputPin, 0);

@@ -37,11 +37,16 @@ x_coord = 0
 y_coord = 0
 pause = 0
 
+
 class States(Enum):
     RxStart = 1
     RxXCoord = 2
     RxYCoord = 3
     RxEnd = 4
+
+class Shape(Enum):
+    Rectangle = 1
+    Circle = 2
 
 state = States.RxStart
 nxtstate = States.RxStart
@@ -50,6 +55,10 @@ sqX=100
 sqY=100
 sqL=50
 sqH=50
+circR = 25
+circX = 125
+circY = 125
+curr_shape = Shape.Rectangle
 
 class StatusBar(Frame):
 
@@ -67,22 +76,53 @@ class StatusBar(Frame):
         self.label.update_idletasks()
 
 def draw_constraint(shape): 
-    global sqX, sqY, sqL, sqH
+    global sqX, sqY, sqL, sqH, circX, circY, circR, curr_shape
     w.delete(ALL)
-    if shape == 1:
-        w.create_rectangle(sqX*(wWidth/250),wHeight-sqY*(wHeight/250),(sqX+sqL)*(wWidth/250), wHeight-(sqY+sqH)*(wHeight/250), fill="lightblue")
-        create_entry(1)
-    if shape == 2:
-        w.create_oval(150,150,350,350, fill="lightblue")
+    curr_shape = shape
+    if shape == Shape.Rectangle:
+        w.create_rectangle(sqX*(wWidth/250),wHeight-sqY*(wHeight/250),(sqX+sqL)*(wWidth/250),\
+                            wHeight-(sqY+sqH)*(wHeight/250), fill="lightblue")
+        create_entry(Shape.Rectangle)
+    if shape == Shape.Circle:
+        w.create_oval((circX-circR)*(wWidth/250),wHeight-(circY-circR)*(wWidth/250),\
+                      (circX+circR)*(wWidth/250),wHeight-(circY+circR)*(wWidth/250), fill="lightblue")
+        create_entry(Shape.Circle)
 
 bOnce = 1;
 bOnce2 = 1;
 def rectIntersect(pX, pY):
-    global sqX, sqY, sqH, sqL, bOnce, bOnce2
+    global sqX, sqY, sqH, sqL
     cTRx = sqX+sqL
-    CBLy = sqY+sqH
-    
-    if (pX >= sqX and pX <= cTRx) and (pY >= sqY and pY <= CBLy):
+    cBLy = sqY+sqH   
+    if (pX >= sqX and pX <= cTRx) and (pY >= sqY and pY <= cBLy):
+        Send_Intersect_Flag(TRUE)
+        xLeft = pX - sqX
+        xRight = cTRx - pX
+        yUp = pY - sqY
+        yDown = cBLy - pY
+        minimum = min(xLeft,xRight,yUp,yDown)
+        if minimum > 9:
+            minimum = 9
+        ser.write(str(minimum).encode())
+    else:
+        Send_Intersect_Flag(FALSE)
+
+def circIntersect(pX, pY):
+    global circX, circY, circR
+    distance = np.sqrt(np.square(circX-pX) + np.square(circY-pY))
+    if distance < circR:
+        Send_Intersect_Flag(TRUE)
+        print(circR-distance)
+        if circR-distance > 9:
+            ser.write("9".encode())
+        else:
+            ser.write(str(int(circR-distance)).encode())
+    else:
+        Send_Intersect_Flag(FALSE)
+        
+def Send_Intersect_Flag(flag):
+    global bOnce, bOnce2
+    if flag:
         if bOnce:
             bOnce2 = 1
             ser.write(b"\xFF")
@@ -91,38 +131,39 @@ def rectIntersect(pX, pY):
         if bOnce2:
             if start_time+1 < time.time():
                 bOnce = 1
-                ser.write("1".encode())
-                bOnce2 = 0
-            
+                ser.write(b"\xFD")
+                bOnce2 = 0   
+                             
 def create_entry(shape):
-    def entry_callback():
-        global sqX, sqY, sqH, sqL
-        sqX = int(entryX.get())
-        sqY = int(entryY.get())
-        sqL = int(entryLength.get())
-        sqH = int(entryHeight.get())
-        draw_constraint(shape)     
-    b=Button(root, text="Set", width = 10, command=entry_callback)
-    b.place(x=680, y=280)
-    if shape == 1:
-        entryX = Entry(root, width = 5)
-        entryX.place(x=760,y=200)
-        entryY = Entry(root, width = 5)
-        entryY.place(x=800,y=200)
-        XYLabel = Label(root, text="Bottom Left X,Y")
-        XYLabel.place(x=660,y=200)
-        entryLength = Entry(root, width = 5)
-        entryLength.place(x=760, y=225)
-        LengthLabel = Label(root, text="Length")
-        LengthLabel.place(x=660,y=225)
-        entryHeight = Entry(root, width = 5)
-        entryHeight.place(x=760, y=250)
-        WidthLabel = Label(root, text="Height")
-        WidthLabel.place(x=660,y=250)     
-        
+    global entryLength, entryHeight, entryX, entryY, XYLabel, LengthLabel, WidthLabel    
+    if shape == Shape.Rectangle:
+        LengthLabel.config(text="Length")
+        XYLabel.config(text="Bottom Left XY")
+        WidthLabel.config(text="Height")
+        entryHeight.configure(state='normal')
+    if shape == Shape.Circle:
+        LengthLabel.config(text="Radius")
+        XYLabel.config(text="Center XY")
+        WidthLabel.config(text="")
+        entryHeight.configure(state='disabled')
+ 
+def entry_callback(event):
+    global sqX, sqY, sqH, sqL, circR, circX, circY, curr_shape
+    if len(entryX.get()) != 0:
+        if curr_shape == Shape.Rectangle:
+            sqX = int(entryX.get())
+            sqY = int(entryY.get())
+            sqL = int(entryLength.get())
+            sqH = int(entryHeight.get())
+        elif curr_shape == Shape.Circle:
+            circR = int(entryLength.get())
+            circX = int(entryX.get())
+            circY = int(entryY.get())
+        draw_constraint(curr_shape)        
+     
 def create_buttons(root):
-    ttk.Button(root, text="Square", command=lambda: draw_constraint(1)).place(x=0,y=0)
-    ttk.Button(root, text="Circle", command=lambda: draw_constraint(2)).place(x=75,y=0)
+    ttk.Button(root, text="Square", command=lambda: draw_constraint(Shape.Rectangle)).place(x=0,y=0)
+    ttk.Button(root, text="Circle", command=lambda: draw_constraint(Shape.Circle)).place(x=75,y=0)
     ttk.Button(root, text="Pause", command=lambda: pause_update()).place(x=500,y=0)
     ttk.Button(root, text="Clear", command=lambda: clear()).place(x=575,y=0)
 
@@ -161,7 +202,7 @@ def pause_update():
     ser.write(b"\xFE")
 
 def clear():
-    global square, sqX, sqY, sqH, sqL
+    global sqX, sqY, sqH, sqL
     sqX = sqY = 100
     sqH = sqL = 50
     w.delete(ALL)
@@ -209,12 +250,16 @@ def main():
     stRcvSuccess.set("%d", success_count)
     stXCoord.set("%d", x_coord)
     stYCoord.set("%d", y_coord)
-    rectIntersect(x_coord, y_coord)
+    
+    if curr_shape == Shape.Rectangle:
+        rectIntersect(x_coord, y_coord)
+    elif curr_shape == Shape.Circle:
+        circIntersect(x_coord, y_coord)
     
     root.after(1,main)
 
 #-----------------------------------------------------------------------------------------    
-#-------------------------Initialization---------------------------------
+#-------------------------------------Initialization--------------------------------------
 #-----------------------------------------------------------------------------------------    
 ser = init_serial()  
 root = init_window()
@@ -229,10 +274,28 @@ stYCoord.place(x=780,y=70)
 w = Canvas(root, width=wWidth, height=wHeight, highlightthickness = 0)
 w.place(x=82,y=98)
 rect = w.create_rectangle(0,0,0,0, fill="blue")
-create_entry(1)
 #-----------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------
+entryX = Entry(root, width = 5)
+entryX.place(x=760,y=200)
+entryY = Entry(root, width = 5)
+entryY.place(x=800,y=200)
+entryLength = Entry(root, width = 5)
+entryLength.place(x=760, y=225)
+entryHeight = Entry(root, width = 5)
+entryHeight.place(x=760, y=250)
+XYLabel = Label(root)
+XYLabel.place(x=660,y=200)
+LengthLabel = Label(root)
+LengthLabel.place(x=660,y=225)
+WidthLabel = Label(root)
+WidthLabel.place(x=660,y=250)
+Label(root, text="Press Enter To Set", font = "Courier 16 bold").place(x=660, y=280)
+#-----------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------
+draw_constraint(Shape.Rectangle)
 root.bind('<Escape>', close)
+root.bind('<Return>', entry_callback)
 root.after(1,main)
 root.mainloop()
 
@@ -242,6 +305,6 @@ root.mainloop()
 #print adc, pin states, internal voltage, temp (if any are applicable)      
 #add length option in receive protocol  
 #display extension length of actuator
-#multiple shapes
+#multiple shapes at once
 #bind keys to do something
-        
+#choose spring, wall, button, etc        
