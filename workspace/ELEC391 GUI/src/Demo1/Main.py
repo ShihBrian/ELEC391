@@ -17,33 +17,29 @@ start_time = time.time()
 
 wHeight = 508
 wWidth = 501
-
+x_old = 0
+y_old = 0
 
 
 style.use("ggplot")
 f = Figure(figsize=(5.4,5.3), dpi=120)
 a = f.add_subplot(111)
 b = f.add_subplot(111)
-a.set_xlim([-125,125])
-a.set_ylim([0,125])
+a.set_xlim([0,250])
+a.set_ylim([0,250])
 idx = 0
 rcvBuf = [0]*6
 changestate = False
 success_count = 0
 fail_count = 0
-angle1 = 0
-angle2 = 0
+x_coord = 0
+y_coord = 0
 pause = 0
-AL = 55
-angle1 = 90
-angle2 = 90
-angle1_old = 0
-angle2_old = 0
-#----------Communication Globals----------#
+
+#=======Communication Globals=======#
 PauseByte = b"\xFE"
 IntersectTrue = b"\xFF"
 IntersectFalse = b"\xFD"
-#-----------------------------------------#
 
 class States(Enum):
     RxStart = 1
@@ -177,8 +173,6 @@ def create_labels(root):
     Label(root, text="Rx Count", font=("Courier", 18)).place(x=660,y=10)
     Label(root, text="X Pos", font=("Courier", 20)).place(x=660,y=40)
     Label(root, text="Y Pos", font=("Courier", 20)).place(x=660,y=70)
-    Label(root, text="Angle 1", font=("Courier", 14)).place(x=685, y=160)
-    Label(root, text="Angle 2", font=("Courier", 14)).place(x=785, y=160)
     
 def init_window():
     root = Tk()
@@ -217,16 +211,9 @@ def clear():
    
 def close(event):
     sys.exit()
-
-def solve_eq(p):
-    global angle1, angle2
-    a,b = p
-    f1 = AL - AL*math.cos(math.radians(angle2)) - AL*math.cos(b) - AL*math.cos(math.radians(angle1)) - AL*math.cos(a)
-    f2 = AL*math.sin(math.radians(angle2)) + AL*math.sin(b) - AL*math.sin(math.radians(angle1)) - AL*math.sin(a)
-    return(f1, f2)
          
 def main():
-    global idx, rcvBuf, state, nextstate, changestate, success_count, angle1, angle2, angle1_old, angle2_old
+    global idx, rcvBuf, state, nextstate, changestate, success_count, x_coord, y_coord, x_old, y_old
     #-----------------------------------------------------------------------------------------    
     #-------------------------Transfer Protocol State Machine---------------------------------
     #-----------------------------------------------------------------------------------------
@@ -247,19 +234,12 @@ def main():
         elif state == States.RxEnd: #should receive endbyte
             if x == 254: #if endbyte is received then update x,y coordinate
                 success_count = success_count + 1
-                angle1 = rcvBuf[0]
-                angle2 = 180 - rcvBuf[1]
-                stAngle1.set("%d", angle1)
-                stAngle2.set("%d", angle2)
-                if angle1_old != angle1 or angle2_old != angle2:
-                    a,b = fsolve(solve_eq,(0,0))
-                    x_c = int(AL*(math.cos(math.radians(angle1))+math.cos(a)))-(AL/2)
-                    y_c = int(AL*(math.sin(math.radians(angle1))+math.sin(a))) 
-                    stXCoord.set("%d", x_c)
-                    stYCoord.set("%d", y_c)               
-                    draw_point((x_c+125)*2,y_c*4)  
-                    angle1_old = angle1
-                    angle2_old = angle2
+                x_coord = rcvBuf[0]
+                y_coord = rcvBuf[1]
+                if x_old != x_coord or y_old != y_coord:
+                    draw_point(x_coord*2,y_coord*2)  
+                    x_old = x_coord
+                    y_old = y_coord
             #else discard bytes and change state back to waiting for startbyte
             changestate = True
             nextstate = States.RxStart
@@ -270,11 +250,13 @@ def main():
     #-----------------------------------------------------------------------------------------
     #-----------------------------------------------------------------------------------------
     stRcvSuccess.set("%d", success_count)
+    stXCoord.set("%d", x_coord)
+    stYCoord.set("%d", y_coord)
     
     if curr_shape == Shape.Rectangle:
-        rectIntersect(angle1, angle2)
+        rectIntersect(x_coord, y_coord)
     elif curr_shape == Shape.Circle:
-        circIntersect(angle1, angle2)
+        circIntersect(x_coord, y_coord)
     
     root.after(1,main)
 
@@ -288,13 +270,9 @@ create_labels(root)
 stRcvSuccess = StatusBar(root)
 stXCoord = StatusBar(root)
 stYCoord = StatusBar(root)
-stAngle1 = StatusBar(root)
-stAngle2 = StatusBar(root)
 stRcvSuccess.place(x=780,y=10)
 stXCoord.place(x=780,y=40)
 stYCoord.place(x=780,y=70)
-stAngle1.place(x=670,y=120)
-stAngle2.place(x=770,y=120)
 w = Canvas(root, width=wWidth, height=wHeight, highlightthickness = 0)
 w.place(x=82,y=98)
 rect = w.create_rectangle(0,0,0,0, fill="blue")

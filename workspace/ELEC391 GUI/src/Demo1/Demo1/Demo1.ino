@@ -15,8 +15,8 @@ SoftwareSerial mySerial(10,11);
 #define CPR 400 //400 ticks per 360 degrees
 #define CLOCKWISE 1
 #define COUNTERCLOCKWISE 2
-volatile long encoderPos = 100.0;
-volatile long encoderPos2 = 100.0;
+volatile long encoderPos = 0.0;
+volatile long encoderPos2 = 0.0;
 volatile long interruptsReceived = 0;
 volatile long interruptsReceived2 = 0;
 short currentdirection = CLOCKWISE;
@@ -112,8 +112,8 @@ curr_tick = millis();
   if(!pause){
     if(curr_tick-tickms >= tick_start){
       Send_Data(startbyte);
-      Send_Data(angle);
-      Send_Data(angle2);
+      Send_Data(encoderPos);
+      Send_Data(10);
       Send_Data(endbyte);  
       tick_start = millis();
     }
