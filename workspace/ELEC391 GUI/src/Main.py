@@ -39,12 +39,16 @@ angle1 = 90
 angle2 = 90
 angle1_old = 0
 angle2_old = 0
+
+intersect_time = time.time()
+intersect_delay = 1
 #----------Communication Globals----------#
 PauseByte = b"\xFE"
 IntersectTrue = b"\xFF"
 IntersectFalse = b"\xFD"
 #-----------------------------------------#
-
+x_c = 0
+y_c = 0
 class States(Enum):
     RxStart = 1
     RxXCoord = 2
@@ -87,8 +91,8 @@ def draw_constraint(shape):
     w.delete(ALL)
     curr_shape = shape
     if shape == Shape.Rectangle:
-        w.create_rectangle(sqX*(wWidth/250),wHeight-sqY*(wHeight/250),(sqX+sqL)*(wWidth/250),\
-                            wHeight-(sqY+sqH)*(wHeight/250), fill="lightblue")
+        w.create_rectangle(sqX*(wWidth/250),wHeight-sqY*(wHeight/125),(sqX+sqL)*(wWidth/250),\
+                            wHeight-(sqY+sqH)*(wHeight/125), fill="lightblue")
         create_entry(Shape.Rectangle)
     if shape == Shape.Circle:
         w.create_oval((circX-circR)*(wWidth/250),wHeight-(circY-circR)*(wWidth/250),\
@@ -98,9 +102,9 @@ def draw_constraint(shape):
 bOnce = 1;
 bOnce2 = 1;
 def rectIntersect(pX, pY):
-    global sqX, sqY, sqH, sqL
+    global sqX, sqY, sqH, sqL, intersect_time, intersect_delay
     cTRx = sqX+sqL
-    cBLy = sqY+sqH   
+    cBLy = sqY+sqH  
     if (pX >= sqX and pX <= cTRx) and (pY >= sqY and pY <= cBLy):
         Send_Intersect_Flag(TRUE)
         xLeft = pX - sqX
@@ -108,9 +112,26 @@ def rectIntersect(pX, pY):
         yUp = pY - sqY
         yDown = cBLy - pY
         minimum = min(xLeft,xRight,yUp,yDown)
-        if minimum > 50:
-            minimum = 50
-        ser.write(str(chr(minimum)).encode())
+        if xLeft == minimum:
+            desired_x = sqX
+            desired_y = pY
+        elif xRight == minimum:
+            desired_x = cTRx
+            desired_y = pY
+        elif yUp == minimum:
+            desired_x = pX
+            desired_y = sqY
+        else:
+            desired_x = pX
+            desired_y = cBLy
+        if time.time()-intersect_delay >= intersect_time:
+            angle1, angle2 = inverse_kinematic(desired_x-125, desired_y)
+            print(angle1, " ", angle2)
+            ser.write(b"\xFB")
+            ser.write(str(chr(int(angle1))).encode())
+            ser.write(str(chr(int(angle2))).encode())
+            ser.write(b"\xFA")
+            intersect_time = time.time()
     else:
         Send_Intersect_Flag(FALSE)
 
@@ -157,7 +178,7 @@ def entry_callback(event):
     global sqX, sqY, sqH, sqL, circR, circX, circY, curr_shape
     if len(entryX.get()) != 0:
         if curr_shape == Shape.Rectangle:
-            sqX = int(entryX.get())
+            sqX = int(entryX.get()) + 125
             sqY = int(entryY.get())
             sqL = int(entryLength.get())
             sqH = int(entryHeight.get())
@@ -218,15 +239,28 @@ def clear():
 def close(event):
     sys.exit()
 
-def solve_eq(p):
+def forward_kinematic(p):
     global angle1, angle2
     a,b = p
     f1 = AL - AL*math.cos(math.radians(angle2)) - AL*math.cos(b) - AL*math.cos(math.radians(angle1)) - AL*math.cos(a)
     f2 = AL*math.sin(math.radians(angle2)) + AL*math.sin(b) - AL*math.sin(math.radians(angle1)) - AL*math.sin(a)
     return(f1, f2)
-         
+
+def inverse_kinematic(x,y):
+    left_base = x + AL/2
+    right_base = AL/2 - x
+    left_inner_length = math.sqrt(left_base**2 + y**2)
+    right_inner_length = math.sqrt(right_base**2 + y**2)
+    left_outer_angle = math.acos(left_inner_length**2/(2*AL*left_inner_length))
+    right_outer_angle = math.acos(right_inner_length**2/(2*AL*right_inner_length))
+    left_inner_angle = math.atan(y/left_base)
+    right_inner_angle = math.atan(y/right_base)
+    left_angle = math.degrees(left_outer_angle + left_inner_angle)
+    right_angle = math.degrees(right_outer_angle + right_inner_angle)
+    return left_angle, right_angle
+    
 def main():
-    global idx, rcvBuf, state, nextstate, changestate, success_count, angle1, angle2, angle1_old, angle2_old
+    global idx, rcvBuf, state, nextstate, changestate, success_count, angle1, angle2, angle1_old, angle2_old, x_c, y_c
     #-----------------------------------------------------------------------------------------    
     #-------------------------Transfer Protocol State Machine---------------------------------
     #-----------------------------------------------------------------------------------------
@@ -252,12 +286,12 @@ def main():
                 stAngle1.set("%d", angle1)
                 stAngle2.set("%d", angle2)
                 if angle1_old != angle1 or angle2_old != angle2:
-                    a,b = fsolve(solve_eq,(0,0))
+                    a,b = fsolve(forward_kinematic,(0,0))
                     x_c = int(AL*(math.cos(math.radians(angle1))+math.cos(a)))-(AL/2)
                     y_c = int(AL*(math.sin(math.radians(angle1))+math.sin(a))) 
                     stXCoord.set("%d", x_c)
                     stYCoord.set("%d", y_c)               
-                    draw_point((x_c+125)*2,y_c*4)  
+                    draw_point((x_c+125)*2,y_c*4.064)  
                     angle1_old = angle1
                     angle2_old = angle2
             #else discard bytes and change state back to waiting for startbyte
@@ -272,9 +306,9 @@ def main():
     stRcvSuccess.set("%d", success_count)
     
     if curr_shape == Shape.Rectangle:
-        rectIntersect(angle1, angle2)
+        rectIntersect(x_c+125, y_c)
     elif curr_shape == Shape.Circle:
-        circIntersect(angle1, angle2)
+        circIntersect(x_c, y_c)
     
     root.after(1,main)
 

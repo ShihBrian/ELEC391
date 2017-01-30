@@ -106,6 +106,13 @@ void Send_Data(int value)
 int PowerLevel = 0;
 double previous_angle = 0;
 int delaytime = 10;
+
+int state = 0;
+int desired_angle1 = 0;
+int desired_angle2 = 0;
+int nextstate = 0;
+bool changestate = false;
+
 void loop() {
 
 curr_tick = millis();
@@ -121,7 +128,7 @@ curr_tick = millis();
 
   if(Serial.available()>0){
     incomingByte = Serial.read();
-    if(incomingByte == 0xFF){
+    if(incomingByte == 0xFF){     
       thresholdPos = encoderPos;
       intersect = true;
       direc = currentdirection;
@@ -130,15 +137,47 @@ curr_tick = millis();
       move_speed = incomingByte-48;
       thresholdPos = 0;
       intersect = false;
+      state = 0;
+      digitalWrite(CWPin, LOW);
+      digitalWrite(CCWPin, LOW);     
     }
     else if(incomingByte == 0xFE){
       pause = !pause;
     }
-    if(intersect)
-      PowerLevel = incomingByte-47;  
-  }
+    if(intersect){
+        if (state == 0){
+          if(incomingByte == 0xFB){
+            nextstate = 1;
+            changestate = true;
+          }
+        }
+        else if(state == 1){
+          desired_angle1 = incomingByte;
+          nextstate = 2;
+          changestate = true;
+        }
+        else if(state == 2){
+          desired_angle2 = incomingByte;
+          nextstate = 3;
+          changestate = true;
+        }
+        else if(state == 3){
+          if(incomingByte == 0xFA){
+            digitalWrite(LEDPin, HIGH);
+            nextstate = 0;
+            changestate = true;
+          }
+        }
+        
+        if(changestate){
+          state = nextstate;
+          changestate = false;
+        }
+      }
+    }
   
-  if(intersect){
+  
+ /* if(intersect){
     if(direc == COUNTERCLOCKWISE){
       analogWrite(CCWPin, PowerLevel*5<=255 ? PowerLevel*5 : 255);
       analogWrite(CWPin, 0);
@@ -151,6 +190,25 @@ curr_tick = millis();
   else{
     analogWrite(CCWPin, 0);
     analogWrite(CWPin, 0);
+  }*/
+
+  if(intersect){
+    if(desired_angle1 < angle){ //turn motor1 clockwise
+      digitalWrite(CWPin, HIGH);
+      digitalWrite(CCWPin, LOW);
+    }
+    else{ //turn motor1 counterclockwise
+      digitalWrite(CCWPin, HIGH);
+      digitalWrite(CWPin, LOW);
+    }
+    if(desired_angle2 < angle2){ //turn motor2 clockwise
+      digitalWrite(CWPin2, HIGH);
+      digitalWrite(CCWPin2, LOW);
+    }
+    else{ //turn motor2 counterclockwise
+      digitalWrite(CCWPin2, HIGH);
+      digitalWrite(CWPin2, LOW);
+    }
   }
 
   /*if((encoderPos != previousPos) || (encoderPos2 != previousPos2)){
