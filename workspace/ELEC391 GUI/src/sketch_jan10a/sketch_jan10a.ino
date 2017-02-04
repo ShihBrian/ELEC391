@@ -34,6 +34,11 @@ unsigned long start_time = millis();
 unsigned int startbyte = 0xFF;
 unsigned int endbyte = 0xFE;
 unsigned int incomingByte = 0;
+
+enum MsgType{
+  encoderleft = 1,
+  encoderright = 2,
+};
 /*===============================*/
 
 double fk_x;
@@ -103,6 +108,28 @@ void Send_Data(int value)
     }  
 }
 
+int get_length(long data){
+  if(int(data/16) == 0){
+    return 1;
+  }
+  else if(int(data/16) < 16){
+    return 2;
+  }
+  else{
+    return 3;
+  } 
+}
+
+void Send_Message(MsgType type,long data){
+  int data_length = get_length(data);
+  Serial.print(startbyte, HEX);
+  Serial.print(type, HEX);
+  Serial.print(data_length, HEX);
+  Serial.print(data, HEX);
+  Serial.print(endbyte, HEX);
+}
+
+
 int PowerLevel = 0;
 double previous_angle = 0;
 int delaytime = 10;
@@ -116,14 +143,17 @@ int direction1;
 int direction2;
 
 void loop() {
-
 curr_tick = millis();
   if(!pause){
     if(curr_tick-tickms >= tick_start){
-      Send_Data(startbyte);
-      Send_Data(encoderPos);
-      Send_Data(encoderPos2);
-      Send_Data(endbyte);  
+      if(previousPos != encoderPos){
+        Send_Message(encoderleft, encoderPos); 
+        previousPos = encoderPos;
+      }
+      if(previousPos2 != encoderPos2){
+        Send_Message(encoderright, encoderPos2); 
+        previousPos2 = encoderPos2;
+      }
       tick_start = millis();
     }
   }

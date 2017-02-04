@@ -43,24 +43,37 @@ angle2_old = 0
 intersect_time = time.time()
 intersect_delay = 1
 #----------Communication Globals----------#
+class States(Enum):
+    RxStart = 1
+    RxMsgType = 2
+    RxMsgLength = 3
+    RxMsg = 4
+    RxEnd = 5
+    
+class eMsgType(Enum):
+    encoderPosLeft = 1
+    encoderPosRight = 2
+    
 PauseByte = b"\xFE"
 IntersectTrue = b"\xFF"
 IntersectFalse = b"\xFD"
+MsgType = 0
+state = States.RxStart
+nxtstate = States.RxStart
+MsgLength = 0
+Startbyte = 255
+EndByte = 254
 #-----------------------------------------#
 x_c = 0
 y_c = 0
-class States(Enum):
-    RxStart = 1
-    RxXCoord = 2
-    RxYCoord = 3
-    RxEnd = 4
+
+
 
 class Shape(Enum):
     Rectangle = 1
     Circle = 2
 
-state = States.RxStart
-nxtstate = States.RxStart
+
 
 sqX=-20
 sqY=60
@@ -235,8 +248,8 @@ def pause_update():
 
 def clear():
     global sqX, sqY, sqH, sqL
-    sqX = sqY = 100
-    sqH = sqL = 50
+    sqX = sqY = 0
+    sqH = sqL = 0
     w.delete(ALL)
    
 def close(event):
@@ -267,51 +280,67 @@ def inverse_kinematic(x,y):
     left_angle = math.degrees(left_outer_angle + left_inner_angle)
     right_angle = math.degrees(right_outer_angle + right_inner_angle)
     return left_angle, right_angle
-    
+
+def MsgHandler(Msgtype, data):
+    global angle1, angle2
+    if Msgtype == eMsgType.encoderPosLeft:
+        angle1 = data*0.9
+        stAngle1.set("%d", angle1)
+        fk_solve()
+    elif Msgtype == eMsgType.encoderPosRight:
+        angle2 = 180-data*0.9
+        stAngle2.set("%d", angle2)
+        fk_solve()  
+
+def fk_solve():
+    global x_c, y_c, angle1_old, angle2_old, angle1, angle2
+    if angle1_old != angle1 or angle2_old != angle2:
+        a,b = fsolve(forward_kinematic,(0,0))
+        x_c = AL*(math.cos(math.radians(angle1))+math.cos(a))-(AL/2)
+        y_c = AL*(math.sin(math.radians(angle1))+math.sin(a))    
+        stXCoord.set("%d", x_c)
+        stYCoord.set("%d", y_c)               
+        draw_point((x_c*10+750)*.334,y_c*4.064)
+        angle1_old = angle1
+        angle2_old = angle2
+ 
 def main():
-    global idx, rcvBuf, state, nextstate, changestate, success_count, angle1, angle2, angle1_old, angle2_old, x_c, y_c, y_old, x_old
+    global state, success_count, x_c, y_c, MsgLength, MsgType, data
     #-----------------------------------------------------------------------------------------    
     #-------------------------Transfer Protocol State Machine---------------------------------
     #-----------------------------------------------------------------------------------------
     if ser.inWaiting()>0:
-        x = int(ser.read(3),16)
         if state == States.RxStart: #waiting to receive startbyte
-            if x == 255: #received startbyte
-                changestate = True
-                nextstate = States.RxXCoord
-        elif state == States.RxXCoord: #receive x coord
-            rcvBuf[0] = x
-            changestate = True
-            nextstate = States.RxYCoord
-        elif state == States.RxYCoord: #receive y coord
-            rcvBuf[1] = x
-            changestate = True
-            nextstate = States.RxEnd
-        elif state == States.RxEnd: #should receive endbyte
-            if x == 254: #if endbyte is received then update x,y coordinate
+            x = int(ser.read(2),16)
+            if x == Startbyte: #received startbyte
+                state = States.RxMsgType
+        elif state == States.RxMsgType: #receive msg type, 1 byte
+            x = int(ser.read(1),16)
+            if x == 1:
+                MsgType = eMsgType.encoderPosLeft
+            elif x == 2:
+                MsgType = eMsgType.encoderPosRight
+            state = States.RxMsgLength
+        elif state == States.RxMsgLength: #receive message length, 1 byte
+            x = int(ser.read(1),16)
+            MsgLength = x
+            if(MsgLength): #if msg length is 0, rx fail and reset to wait for start
+                state = States.RxMsg
+            else:
+                state = States.RxStart
+        elif state == States.RxMsg: #receive msg length bytes of data 
+            data = int(ser.read(MsgLength),16)
+            state = States.RxEnd
+        elif state == States.RxEnd: #wait for endbyte, if received proceed to handle message, else go back to start          
+            x = int(ser.read(2),16)
+            if x == EndByte: #if endbyte is received then update x,y coordinate
                 success_count = success_count + 1
-                angle1 = rcvBuf[0]*0.9
-                angle2 = 180-rcvBuf[1]*0.9
-                stAngle1.set("%d", angle1)
-                stAngle2.set("%d", angle2)
-                if angle1_old != angle1 or angle2_old != angle2:
-                    a,b = fsolve(forward_kinematic,(0,0))
-                    x_c = AL*(math.cos(math.radians(angle1))+math.cos(a))-(AL/2)
-                    y_c = AL*(math.sin(math.radians(angle1))+math.sin(a)) 
-                    stXCoord.set("%d", x_c)
-                    stYCoord.set("%d", y_c)               
-                    draw_point((x_c*10+750)*.334,y_c*4.064)
-                    angle1_old = angle1
-                    angle2_old = angle2
+                MsgHandler(MsgType, data)
             #else discard bytes and change state back to waiting for startbyte
-            changestate = True
-            nextstate = States.RxStart
-                
-    if changestate:
-        state = nextstate
-        
+            state = States.RxStart                         
     #-----------------------------------------------------------------------------------------
     #-----------------------------------------------------------------------------------------
+    
     stRcvSuccess.set("%d", success_count)
     
     if curr_shape == Shape.Rectangle:
