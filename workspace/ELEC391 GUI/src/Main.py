@@ -13,36 +13,24 @@ from enum import Enum
 from matplotlib import style
 import time
 from scipy.optimize import fsolve
-start_time = time.time()
 
+#==============Plot Globals===============#
 wHeight = 508
 wWidth = 501
-
-
-
 style.use("ggplot")
 f = Figure(figsize=(5.4,5.3), dpi=120)
 a = f.add_subplot(111)
 b = f.add_subplot(111)
 a.set_xlim([-75,75])
 a.set_ylim([0,125])
-idx = 0
-rcvBuf = [0]*6
-changestate = False
-success_count = 0
-fail_count = 0
-angle1 = 0
-angle2 = 0
-pause = 0
+x_c = 0
+y_c = 0
 AL = 55
 angle1 = 90
 angle2 = 90
-angle1_old = 0
-angle2_old = 0
+#=========================================#
 
-intersect_time = time.time()
-intersect_delay = 1
-#----------Communication Globals----------#
+#=========Communication Globals===========#
 class States(Enum):
     RxStart = 1
     RxMsgType = 2
@@ -53,6 +41,8 @@ class States(Enum):
 class eMsgType(Enum):
     encoderPosLeft = 1
     encoderPosRight = 2
+    desiredLeft = 3
+    desiredRight = 4
     
 PauseByte = b"\xFE"
 IntersectTrue = b"\xFF"
@@ -63,17 +53,13 @@ nxtstate = States.RxStart
 MsgLength = 0
 Startbyte = 255
 EndByte = 254
-#-----------------------------------------#
-x_c = 0
-y_c = 0
+success_count = 0
+#==========================================#
 
-
-
+#===========Constraint Globals=============#
 class Shape(Enum):
     Rectangle = 1
     Circle = 2
-
-
 
 sqX=-20
 sqY=60
@@ -83,6 +69,14 @@ circR = 25
 circX = 125
 circY = 125
 curr_shape = Shape.Rectangle
+#==========================================#
+
+pause = 0
+intersect_time = time.time()
+intersect_delay = 1
+start_time = time.time()
+start_time2 = time.time()*1000
+time2_delay = 100
 
 class StatusBar(Frame):
 
@@ -117,7 +111,7 @@ bOnce = 1;
 bOnce2 = 1;
 bOnce3 = 1;
 def rectIntersect(pX, pY):
-    global sqX, sqY, sqH, sqL, intersect_time, intersect_delay, bOnce3
+    global sqX, sqY, sqH, sqL, intersect_time, intersect_delay, bOnce3, start_time2
     cTRx = sqX+sqL
     cBLy = sqY+sqH  
     if (pX >= sqX and pX <= cTRx) and (pY >= sqY and pY <= cBLy):
@@ -139,16 +133,23 @@ def rectIntersect(pX, pY):
         else:
             desired_x = pX
             desired_y = cBLy+1
-        if bOnce3:
+        if start_time2+time2_delay < time.time()*1000:
             angle1, angle2 = inverse_kinematic(desired_x-75, desired_y)
             print(angle1, " ", angle2)
             ser.write(b"\xFB")
-            ser.write(str(chr(int(angle1))).encode())
-            ser.write(str(chr(int(angle2))).encode())
+            value = [int(angle1)]
+            angle = bytes(value)
+            ser.write(angle)
+            value = [int(angle2)]
+            angle = bytes(value)
+            ser.write(angle)
             ser.write(b"\xFA")
+            start_time2 = time.time()*1000
             bOnce3 = 0;
     else:
         Send_Intersect_Flag(FALSE)
+        stDesired1.set("%s", "")
+        stDesired2.set("%s", "")
 
 def circIntersect(pX, pY):
     global circX, circY, circR
@@ -214,8 +215,10 @@ def create_labels(root):
     Label(root, text="Rx Count", font=("Courier", 18)).place(x=660,y=10)
     Label(root, text="X Pos", font=("Courier", 20)).place(x=660,y=40)
     Label(root, text="Y Pos", font=("Courier", 20)).place(x=660,y=70)
-    Label(root, text="Angle 1", font=("Courier", 14)).place(x=685, y=160)
-    Label(root, text="Angle 2", font=("Courier", 14)).place(x=785, y=160)
+    Label(root, text="Angle 1", font=("Courier", 14)).place(x=685, y=155)
+    Label(root, text="Angle 2", font=("Courier", 14)).place(x=785, y=155)
+    Label(root, text="Desired1", font=("Courier", 14)).place(x=670, y=215)
+    Label(root, text="Desired2", font=("Courier", 14)).place(x=780, y=215)
     
 def init_window():
     root = Tk()
@@ -255,17 +258,11 @@ def clear():
 def close(event):
     sys.exit()
 
-
-a = 55
-b = 55
-c = 55
-d = 55
-e = 55
 def forward_kinematic(p):
-    global angle1, angle2, a, b, c, d, e
+    global angle1, angle2
     alpha,beta = p
-    f1 = a - b*math.cos(math.radians(angle2)) - c*math.cos(beta) - e*math.cos(math.radians(angle1)) - d*math.cos(alpha)
-    f2 = a*math.sin(math.radians(angle2)) + c*math.sin(beta) - e*math.sin(math.radians(angle1)) - d*math.sin(alpha)
+    f1 = AL - AL*math.cos(math.radians(angle2)) - AL*math.cos(beta) - AL*math.cos(math.radians(angle1)) - AL*math.cos(alpha)
+    f2 = AL*math.sin(math.radians(angle2)) + AL*math.sin(beta) - AL*math.sin(math.radians(angle1)) - AL*math.sin(alpha)
     return(f1, f2)
 
 def inverse_kinematic(x,y):
@@ -285,24 +282,26 @@ def MsgHandler(Msgtype, data):
     global angle1, angle2
     if Msgtype == eMsgType.encoderPosLeft:
         angle1 = data*0.9
-        stAngle1.set("%d", angle1)
+        stAngle1.set("%.1lf", angle1)
         fk_solve()
     elif Msgtype == eMsgType.encoderPosRight:
         angle2 = 180-data*0.9
-        stAngle2.set("%d", angle2)
+        stAngle2.set("%.1lf", angle2)
         fk_solve()  
+    elif Msgtype == eMsgType.desiredLeft:
+        stDesired1.set("%d", data)
+    elif Msgtype == eMsgType.desiredRight:
+        stDesired2.set("%d", data)
 
 def fk_solve():
-    global x_c, y_c, angle1_old, angle2_old, angle1, angle2
-    if angle1_old != angle1 or angle2_old != angle2:
-        a,b = fsolve(forward_kinematic,(0,0))
-        x_c = AL*(math.cos(math.radians(angle1))+math.cos(a))-(AL/2)
-        y_c = AL*(math.sin(math.radians(angle1))+math.sin(a))    
-        stXCoord.set("%d", x_c)
-        stYCoord.set("%d", y_c)               
-        draw_point((x_c*10+750)*.334,y_c*4.064)
-        angle1_old = angle1
-        angle2_old = angle2
+    global x_c, y_c, angle1, angle2
+    
+    a,b = fsolve(forward_kinematic,(0,0))
+    x_c = AL*(math.cos(math.radians(angle1))+math.cos(a))-(AL/2)
+    y_c = AL*(math.sin(math.radians(angle1))+math.sin(a))    
+    stXCoord.set("%d", x_c)
+    stYCoord.set("%d", y_c)               
+    draw_point((x_c*10+750)*.334,y_c*4.064)
  
 def main():
     global state, success_count, x_c, y_c, MsgLength, MsgType, data
@@ -320,6 +319,10 @@ def main():
                 MsgType = eMsgType.encoderPosLeft
             elif x == 2:
                 MsgType = eMsgType.encoderPosRight
+            elif x == 3:
+                MsgType = eMsgType.desiredLeft
+            elif x == 4:
+                MsgType = eMsgType.desiredRight
             state = States.RxMsgLength
         elif state == States.RxMsgLength: #receive message length, 1 byte
             x = int(ser.read(1),16)
@@ -362,31 +365,35 @@ stXCoord = StatusBar(root)
 stYCoord = StatusBar(root)
 stAngle1 = StatusBar(root)
 stAngle2 = StatusBar(root)
+stDesired1 = StatusBar(root)
+stDesired2 = StatusBar(root)
 stRcvSuccess.place(x=780,y=10)
 stXCoord.place(x=780,y=40)
 stYCoord.place(x=780,y=70)
 stAngle1.place(x=670,y=120)
 stAngle2.place(x=770,y=120)
+stDesired1.place(x=670, y=180)
+stDesired2.place(x=770, y=180)
 w = Canvas(root, width=wWidth, height=wHeight, highlightthickness = 0)
 w.place(x=82,y=98)
 rect = w.create_rectangle(0,0,0,0, fill="blue")
 #-----------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------
 entryX = Entry(root, width = 5)
-entryX.place(x=760,y=200)
+entryX.place(x=760,y=300)
 entryY = Entry(root, width = 5)
-entryY.place(x=800,y=200)
+entryY.place(x=800,y=300)
 entryLength = Entry(root, width = 5)
-entryLength.place(x=760, y=225)
+entryLength.place(x=760, y=325)
 entryHeight = Entry(root, width = 5)
-entryHeight.place(x=760, y=250)
+entryHeight.place(x=760, y=350)
 XYLabel = Label(root)
-XYLabel.place(x=660,y=200)
+XYLabel.place(x=660,y=300)
 LengthLabel = Label(root)
-LengthLabel.place(x=660,y=225)
+LengthLabel.place(x=660,y=325)
 WidthLabel = Label(root)
-WidthLabel.place(x=660,y=250)
-Label(root, text="Press Enter To Set", font = "Courier 16 bold").place(x=660, y=280)
+WidthLabel.place(x=660,y=350)
+Label(root, text="Press Enter To Set", font = "Courier 16 bold").place(x=660, y=380)
 #-----------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------
 draw_constraint(Shape.Rectangle)
@@ -397,9 +404,7 @@ root.mainloop()
 
 #more shapes
 #images
-#custom shapes
-#print adc, pin states, internal voltage, temp (if any are applicable)      
-#add length option in receive protocol  
+#custom shapes   
 #display extension length of actuator
 #multiple shapes at once
 #bind keys to do something

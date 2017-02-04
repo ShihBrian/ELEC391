@@ -38,6 +38,8 @@ unsigned int incomingByte = 0;
 enum MsgType{
   encoderleft = 1,
   encoderright = 2,
+  desiredleft = 3,
+  desiredright = 4,
 };
 /*===============================*/
 
@@ -161,13 +163,9 @@ curr_tick = millis();
   if(Serial.available()>0){
     incomingByte = Serial.read();
     if(incomingByte == 0xFF){     
-      thresholdPos = encoderPos;
       intersect = true;
-      direc = currentdirection;
     }
     else if(incomingByte == 0xFD){
-      move_speed = incomingByte-48;
-      thresholdPos = 0;
       intersect = false;
       state = 0;
       digitalWrite(CWPin, LOW);
@@ -181,58 +179,53 @@ curr_tick = millis();
     if(intersect){
         if (state == 0){
           if(incomingByte == 0xFB){
-            nextstate = 1;
-            changestate = true;
+            state = 1;
           }
         }
         else if(state == 1){
           desired_angle1 = incomingByte;
-          if (desired_angle1 < angle)
+          Send_Message(desiredleft, desired_angle1);
+          desired_angle1 -= angle;
+          if (desired_angle1 < 0)
             direction1 = CLOCKWISE;
           else
             direction1 = COUNTERCLOCKWISE;
-          nextstate = 2;
-          changestate = true;
+          state = 2;
         }
         else if(state == 2){
           desired_angle2 = incomingByte;
-          if (desired_angle2 > (180-angle2))
+          Send_Message(desiredright, desired_angle2);
+          desired_angle2 -= (180-angle2);
+          if (desired_angle2 > 0)
             direction2 = CLOCKWISE;
           else
             direction2 = COUNTERCLOCKWISE;
-          nextstate = 3;
-          changestate = true;
+          state = 3;
         }
         else if(state == 3){
           if(incomingByte == 0xFA){
             digitalWrite(LEDPin, HIGH);
-            nextstate = 0;
-            changestate = true;
+            state = 0;
           }
-        }
-        
-        if(changestate){
-          state = nextstate;
-          changestate = false;
         }
       }
     }
 
   if(intersect){
     if(direction1 == CLOCKWISE){ //turn motor1 clockwise
-      digitalWrite(CWPin, HIGH);
+      analogWrite(CWPin, abs(desired_angle1)*20 < 255? abs(desired_angle1)*20 : 255);
       digitalWrite(CCWPin, LOW);
     }
     else{ //turn motor1 counterclockwise
-      digitalWrite(CCWPin, HIGH);
+      analogWrite(CCWPin, abs(desired_angle1)*20 < 255? abs(desired_angle1)*20 : 255);
       digitalWrite(CWPin, LOW);
     }
     if(direction2 == CLOCKWISE){ //turn motor2 clockwise
-      digitalWrite(CWPin2, HIGH);
+      analogWrite(CWPin2, abs(desired_angle2)*20 > 255? abs(desired_angle2)*20 : 255);
       digitalWrite(CCWPin2, LOW);
     }
     else{ //turn motor2 counterclockwise
-      digitalWrite(CCWPin2, HIGH);
+      analogWrite(CCWPin2, abs(desired_angle2)*20 > 255? abs(desired_angle2)*20 : 255);
       digitalWrite(CWPin2, LOW);
     }
   }
