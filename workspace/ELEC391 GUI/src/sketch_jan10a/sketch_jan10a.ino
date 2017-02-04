@@ -112,6 +112,8 @@ int desired_angle1 = 0;
 int desired_angle2 = 0;
 int nextstate = 0;
 bool changestate = false;
+int direction1;
+int direction2;
 
 void loop() {
 
@@ -119,8 +121,8 @@ curr_tick = millis();
   if(!pause){
     if(curr_tick-tickms >= tick_start){
       Send_Data(startbyte);
-      Send_Data(angle);
-      Send_Data(angle2);
+      Send_Data(encoderPos);
+      Send_Data(encoderPos2);
       Send_Data(endbyte);  
       tick_start = millis();
     }
@@ -139,7 +141,9 @@ curr_tick = millis();
       intersect = false;
       state = 0;
       digitalWrite(CWPin, LOW);
-      digitalWrite(CCWPin, LOW);     
+      digitalWrite(CCWPin, LOW);
+      digitalWrite(CWPin2, LOW);
+      digitalWrite(CCWPin2, LOW);       
     }
     else if(incomingByte == 0xFE){
       pause = !pause;
@@ -153,11 +157,19 @@ curr_tick = millis();
         }
         else if(state == 1){
           desired_angle1 = incomingByte;
+          if (desired_angle1 < angle)
+            direction1 = CLOCKWISE;
+          else
+            direction1 = COUNTERCLOCKWISE;
           nextstate = 2;
           changestate = true;
         }
         else if(state == 2){
           desired_angle2 = incomingByte;
+          if (desired_angle2 > (180-angle2))
+            direction2 = CLOCKWISE;
+          else
+            direction2 = COUNTERCLOCKWISE;
           nextstate = 3;
           changestate = true;
         }
@@ -175,25 +187,9 @@ curr_tick = millis();
         }
       }
     }
-  
-  
- /* if(intersect){
-    if(direc == COUNTERCLOCKWISE){
-      analogWrite(CCWPin, PowerLevel*5<=255 ? PowerLevel*5 : 255);
-      analogWrite(CWPin, 0);
-    }
-    else if(direc == CLOCKWISE){
-      analogWrite(CWPin, PowerLevel*5<=255 ? PowerLevel*5 : 255);
-      analogWrite(CCWPin, 0);
-    }
-  }
-  else{
-    analogWrite(CCWPin, 0);
-    analogWrite(CWPin, 0);
-  }*/
 
   if(intersect){
-    if(desired_angle1 < angle){ //turn motor1 clockwise
+    if(direction1 == CLOCKWISE){ //turn motor1 clockwise
       digitalWrite(CWPin, HIGH);
       digitalWrite(CCWPin, LOW);
     }
@@ -201,7 +197,7 @@ curr_tick = millis();
       digitalWrite(CCWPin, HIGH);
       digitalWrite(CWPin, LOW);
     }
-    if(desired_angle2 < angle2){ //turn motor2 clockwise
+    if(direction2 == CLOCKWISE){ //turn motor2 clockwise
       digitalWrite(CWPin2, HIGH);
       digitalWrite(CCWPin2, LOW);
     }
@@ -210,7 +206,14 @@ curr_tick = millis();
       digitalWrite(CWPin2, LOW);
     }
   }
-
+  
+  if(encoderPos > 199 || encoderPos < 1 || encoderPos2 > 199 || encoderPos2 < 1  ){
+      digitalWrite(CWPin, LOW);
+      digitalWrite(CCWPin, LOW);
+      digitalWrite(CCWPin2, LOW);
+      digitalWrite(CWPin2, LOW);    
+  }
+  
   /*if((encoderPos != previousPos) || (encoderPos2 != previousPos2)){
     Serial.print(encoderPos);
     Serial.print("\t");

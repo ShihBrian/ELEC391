@@ -24,7 +24,7 @@ style.use("ggplot")
 f = Figure(figsize=(5.4,5.3), dpi=120)
 a = f.add_subplot(111)
 b = f.add_subplot(111)
-a.set_xlim([-125,125])
+a.set_xlim([-75,75])
 a.set_ylim([0,125])
 idx = 0
 rcvBuf = [0]*6
@@ -62,10 +62,10 @@ class Shape(Enum):
 state = States.RxStart
 nxtstate = States.RxStart
 
-sqX=100
-sqY=100
-sqL=50
-sqH=50
+sqX=-20
+sqY=60
+sqL=40
+sqH=30
 circR = 25
 circX = 125
 circY = 125
@@ -90,19 +90,21 @@ def draw_constraint(shape):
     global sqX, sqY, sqL, sqH, circX, circY, circR, curr_shape
     w.delete(ALL)
     curr_shape = shape
+    sqX = abs(sqX+75)
     if shape == Shape.Rectangle:
-        w.create_rectangle(sqX*(wWidth/250),wHeight-sqY*(wHeight/125),(sqX+sqL)*(wWidth/250),\
+        w.create_rectangle(sqX*(wWidth/150),wHeight-sqY*(wHeight/125),(sqX+sqL)*(wWidth/150),\
                             wHeight-(sqY+sqH)*(wHeight/125), fill="lightblue")
         create_entry(Shape.Rectangle)
     if shape == Shape.Circle:
-        w.create_oval((circX-circR)*(wWidth/250),wHeight-(circY-circR)*(wWidth/250),\
-                      (circX+circR)*(wWidth/250),wHeight-(circY+circR)*(wWidth/250), fill="lightblue")
+        w.create_oval((circX-circR)*(wWidth/150),wHeight-(circY-circR)*(wWidth/150),\
+                      (circX+circR)*(wWidth/150),wHeight-(circY+circR)*(wWidth/150), fill="lightblue")
         create_entry(Shape.Circle)
 
 bOnce = 1;
 bOnce2 = 1;
+bOnce3 = 1;
 def rectIntersect(pX, pY):
-    global sqX, sqY, sqH, sqL, intersect_time, intersect_delay
+    global sqX, sqY, sqH, sqL, intersect_time, intersect_delay, bOnce3
     cTRx = sqX+sqL
     cBLy = sqY+sqH  
     if (pX >= sqX and pX <= cTRx) and (pY >= sqY and pY <= cBLy):
@@ -113,25 +115,25 @@ def rectIntersect(pX, pY):
         yDown = cBLy - pY
         minimum = min(xLeft,xRight,yUp,yDown)
         if xLeft == minimum:
-            desired_x = sqX
+            desired_x = sqX-1
             desired_y = pY
         elif xRight == minimum:
-            desired_x = cTRx
+            desired_x = cTRx+1
             desired_y = pY
         elif yUp == minimum:
             desired_x = pX
-            desired_y = sqY
+            desired_y = sqY-1
         else:
             desired_x = pX
-            desired_y = cBLy
-        if time.time()-intersect_delay >= intersect_time:
-            angle1, angle2 = inverse_kinematic(desired_x-125, desired_y)
+            desired_y = cBLy+1
+        if bOnce3:
+            angle1, angle2 = inverse_kinematic(desired_x-75, desired_y)
             print(angle1, " ", angle2)
             ser.write(b"\xFB")
             ser.write(str(chr(int(angle1))).encode())
             ser.write(str(chr(int(angle2))).encode())
             ser.write(b"\xFA")
-            intersect_time = time.time()
+            bOnce3 = 0;
     else:
         Send_Intersect_Flag(FALSE)
 
@@ -148,7 +150,7 @@ def circIntersect(pX, pY):
         Send_Intersect_Flag(FALSE)
         
 def Send_Intersect_Flag(flag):
-    global bOnce, bOnce2
+    global bOnce, bOnce2,bOnce3
     if flag:
         if bOnce:
             bOnce2 = 1
@@ -159,7 +161,8 @@ def Send_Intersect_Flag(flag):
             if start_time+1 < time.time():
                 bOnce = 1
                 ser.write(IntersectFalse)
-                bOnce2 = 0   
+                bOnce2 = 0
+                bOnce3 = 1   
                              
 def create_entry(shape):
     global entryLength, entryHeight, entryX, entryY, XYLabel, LengthLabel, WidthLabel    
@@ -178,7 +181,7 @@ def entry_callback(event):
     global sqX, sqY, sqH, sqL, circR, circX, circY, curr_shape
     if len(entryX.get()) != 0:
         if curr_shape == Shape.Rectangle:
-            sqX = int(entryX.get()) + 125
+            sqX = int(entryX.get())
             sqY = int(entryY.get())
             sqL = int(entryLength.get())
             sqH = int(entryHeight.get())
@@ -239,11 +242,17 @@ def clear():
 def close(event):
     sys.exit()
 
+
+a = 55
+b = 55
+c = 55
+d = 55
+e = 55
 def forward_kinematic(p):
-    global angle1, angle2
-    a,b = p
-    f1 = AL - AL*math.cos(math.radians(angle2)) - AL*math.cos(b) - AL*math.cos(math.radians(angle1)) - AL*math.cos(a)
-    f2 = AL*math.sin(math.radians(angle2)) + AL*math.sin(b) - AL*math.sin(math.radians(angle1)) - AL*math.sin(a)
+    global angle1, angle2, a, b, c, d, e
+    alpha,beta = p
+    f1 = a - b*math.cos(math.radians(angle2)) - c*math.cos(beta) - e*math.cos(math.radians(angle1)) - d*math.cos(alpha)
+    f2 = a*math.sin(math.radians(angle2)) + c*math.sin(beta) - e*math.sin(math.radians(angle1)) - d*math.sin(alpha)
     return(f1, f2)
 
 def inverse_kinematic(x,y):
@@ -260,7 +269,7 @@ def inverse_kinematic(x,y):
     return left_angle, right_angle
     
 def main():
-    global idx, rcvBuf, state, nextstate, changestate, success_count, angle1, angle2, angle1_old, angle2_old, x_c, y_c
+    global idx, rcvBuf, state, nextstate, changestate, success_count, angle1, angle2, angle1_old, angle2_old, x_c, y_c, y_old, x_old
     #-----------------------------------------------------------------------------------------    
     #-------------------------Transfer Protocol State Machine---------------------------------
     #-----------------------------------------------------------------------------------------
@@ -281,17 +290,17 @@ def main():
         elif state == States.RxEnd: #should receive endbyte
             if x == 254: #if endbyte is received then update x,y coordinate
                 success_count = success_count + 1
-                angle1 = rcvBuf[0]
-                angle2 = 180 - rcvBuf[1]
+                angle1 = rcvBuf[0]*0.9
+                angle2 = 180-rcvBuf[1]*0.9
                 stAngle1.set("%d", angle1)
                 stAngle2.set("%d", angle2)
                 if angle1_old != angle1 or angle2_old != angle2:
                     a,b = fsolve(forward_kinematic,(0,0))
-                    x_c = int(AL*(math.cos(math.radians(angle1))+math.cos(a)))-(AL/2)
-                    y_c = int(AL*(math.sin(math.radians(angle1))+math.sin(a))) 
+                    x_c = AL*(math.cos(math.radians(angle1))+math.cos(a))-(AL/2)
+                    y_c = AL*(math.sin(math.radians(angle1))+math.sin(a)) 
                     stXCoord.set("%d", x_c)
                     stYCoord.set("%d", y_c)               
-                    draw_point((x_c+125)*2,y_c*4.064)  
+                    draw_point((x_c*10+750)*.334,y_c*4.064)
                     angle1_old = angle1
                     angle2_old = angle2
             #else discard bytes and change state back to waiting for startbyte
@@ -306,7 +315,7 @@ def main():
     stRcvSuccess.set("%d", success_count)
     
     if curr_shape == Shape.Rectangle:
-        rectIntersect(x_c+125, y_c)
+        rectIntersect(x_c+75, y_c)
     elif curr_shape == Shape.Circle:
         circIntersect(x_c, y_c)
     
