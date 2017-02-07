@@ -109,9 +109,8 @@ def draw_constraint(shape):
 
 bOnce = 1;
 bOnce2 = 1;
-bOnce3 = 1;
 def rectIntersect(pX, pY):
-    global sqX, sqY, sqH, sqL, intersect_time, intersect_delay, bOnce3, start_time2
+    global sqX, sqY, sqH, sqL, intersect_time, intersect_delay,start_time2
     cTRx = sqX+sqL
     cBLy = sqY+sqH  
     if (pX >= sqX and pX <= cTRx) and (pY >= sqY and pY <= cBLy):
@@ -145,7 +144,6 @@ def rectIntersect(pX, pY):
             ser.write(angle)
             ser.write(b"\xFA")
             start_time2 = time.time()*1000
-            bOnce3 = 0;
     else:
         Send_Intersect_Flag(FALSE)
         stDesired1.set("%s", "")
@@ -164,7 +162,7 @@ def circIntersect(pX, pY):
         Send_Intersect_Flag(FALSE)
         
 def Send_Intersect_Flag(flag):
-    global bOnce, bOnce2,bOnce3
+    global bOnce, bOnce2
     if flag:
         if bOnce:
             bOnce2 = 1
@@ -175,8 +173,7 @@ def Send_Intersect_Flag(flag):
             if start_time+1 < time.time():
                 bOnce = 1
                 ser.write(IntersectFalse)
-                bOnce2 = 0
-                bOnce3 = 1   
+                bOnce2 = 0 
                              
 def create_entry(shape):
     global entryLength, entryHeight, entryX, entryY, XYLabel, LengthLabel, WidthLabel    
@@ -222,7 +219,7 @@ def create_labels(root):
     
 def init_window():
     root = Tk()
-    root.geometry('900x700+600+80')
+    root.geometry('900x700+200+80')
     tk.Tk.wm_title(root, "ELEC 391 GUI")
     canvas = FigureCanvasTkAgg(f, root)
     canvas.show()

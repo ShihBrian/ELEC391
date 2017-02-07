@@ -1,10 +1,14 @@
+#include <PID_v1.h>
 #include <SoftwareSerial.h>
 #include <math.h>
+
 #define LEDPin 13
-#define CCWPin 4
-#define CWPin 5
+#define CWPin 4
+#define CCWPin 5
 #define CWPin2 6
 #define CCWPin2 7
+
+//#define DEBUG
 SoftwareSerial mySerial(10,11);
 /*===============================*/
 //Globals for optical encoder
@@ -34,6 +38,7 @@ unsigned long start_time = millis();
 unsigned int startbyte = 0xFF;
 unsigned int endbyte = 0xFE;
 unsigned int incomingByte = 0;
+int state = 0;
 
 enum MsgType{
   encoderleft = 1,
@@ -42,23 +47,17 @@ enum MsgType{
   desiredright = 4,
 };
 /*===============================*/
-
-double fk_x;
-double fk_y;
-double arm_length = 55;
-double top_angles[3];
 unsigned long tick_start = millis();
 unsigned long tickms = 10;
 unsigned long curr_tick;
-int x = 10;
-int y = 10;
-int dx = 1;
-int dy = 0;
-int move_speed = 1;
+
 bool pause = false;
-int thresholdPos = 0;
 bool intersect = false;
-int direc = CLOCKWISE;
+int desired_angle1 = 0;
+int desired_angle2 = 0;
+int direction1;
+int direction2;
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
@@ -131,21 +130,10 @@ void Send_Message(MsgType type,long data){
   Serial.print(endbyte, HEX);
 }
 
-
-int PowerLevel = 0;
-double previous_angle = 0;
-int delaytime = 10;
-
-int state = 0;
-int desired_angle1 = 0;
-int desired_angle2 = 0;
-int nextstate = 0;
-bool changestate = false;
-int direction1;
-int direction2;
-
 void loop() {
-curr_tick = millis();
+
+#ifndef DEBUG
+  curr_tick = millis();
   if(!pause){
     if(curr_tick-tickms >= tick_start){
       if(previousPos != encoderPos){
@@ -237,13 +225,15 @@ curr_tick = millis();
       digitalWrite(CWPin2, LOW);    
   }
   
-  /*if((encoderPos != previousPos) || (encoderPos2 != previousPos2)){
+#else  
+  if((encoderPos != previousPos) || (encoderPos2 != previousPos2)){
     Serial.print(encoderPos);
     Serial.print("\t");
     Serial.println(encoderPos2);
     previousPos = encoderPos;
     previousPos2 = encoderPos2;
-  }*/
+  }  
+#endif DEBUG
 
 }
 void ISR_GPIO()
