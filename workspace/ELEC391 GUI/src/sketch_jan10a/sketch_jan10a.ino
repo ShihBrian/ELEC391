@@ -45,18 +45,39 @@ enum MsgType{
   encoderright = 2,
   desiredleft = 3,
   desiredright = 4,
+  debug = 5,
 };
 /*===============================*/
 unsigned long tick_start = millis();
 unsigned long tickms = 10;
 unsigned long curr_tick;
-
 bool pause = false;
 bool intersect = false;
 int desired_angle1 = 0;
 int desired_angle2 = 0;
 int direction1;
 int direction2;
+
+float Kp1 = 10;
+float Ki1 = 0;
+float Kd1 = 0;
+float Kp2 = 10;
+float Ki2 = 0;
+float Kd2 = 0;
+
+double Desired1, Actual1, PIDOutput1;
+double Desired2, Actual2, PIDOutput2;
+PID PID1(&Actual1, &PIDOutput1, &Desired1, Kp1, Ki1, Kd1, DIRECT);
+PID PID2(&Actual2, &PIDOutput2, &Desired2, Kp2, Ki2, Kd2, DIRECT);
+const int sampleRate = 10; // Variable that determines how fast our PID loop runs
+
+// Communication setup
+const long serialPing = 500; //This determines how often we ping our loop
+// Serial pingback interval in milliseconds
+unsigned long now = 0; //This variable is used to keep track of time
+// placehodler for current timestamp
+unsigned long lastMessage = 0; //This keeps track of when our loop last spoke to serial
+// last message timestamp.
 
 void setup() {
   // put your setup code here, to run once:
@@ -73,40 +94,13 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ENCODERBPIN),ISR_GPIO2, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODERAPIN2),ISR_GPIO3, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODERBPIN2),ISR_GPIO4, CHANGE);
+  PID1.SetMode(AUTOMATIC);
+  PID2.SetMode(AUTOMATIC);
+  PID1.SetSampleTime(sampleRate);
+  PID2.SetSampleTime(sampleRate);
   while(!Serial){
   }
   delay(100);
-}
-
-void Add_Padding(int padding, unsigned int data)
-{
-  if (padding == 2)
-  {
-    Serial.print("00");
-    Serial.print(data,HEX);
-  }
-  else if(padding == 1)
-  {
-    Serial.print("0");
-    Serial.print(data, HEX);
-  }
-  else
-  {
-    Serial.print(data,HEX);
-  }
-}
-
-void Send_Data(int value)
-{
-    if(value < 16){
-      Add_Padding(2,value );   
-    }
-    else if (value  < 256){
-      Add_Padding(1,value ); 
-    }
-    else{
-      Add_Padding(0,value ); 
-    }  
 }
 
 int get_length(long data){
@@ -143,7 +137,12 @@ void loop() {
       if(previousPos2 != encoderPos2){
         Send_Message(encoderright, encoderPos2); 
         previousPos2 = encoderPos2;
+        Send_Message(debug, 1); 
+        Send_Message(debug, Actual2);        
+        Send_Message(debug, Desired2);   
+ 
       }
+
       tick_start = millis();
     }
   }
@@ -173,8 +172,7 @@ void loop() {
         else if(state == 1){
           desired_angle1 = incomingByte;
           Send_Message(desiredleft, desired_angle1);
-          desired_angle1 -= angle;
-          if (desired_angle1 < 0)
+          if (desired_angle1 - angle < 0)
             direction1 = CLOCKWISE;
           else
             direction1 = COUNTERCLOCKWISE;
@@ -183,8 +181,7 @@ void loop() {
         else if(state == 2){
           desired_angle2 = incomingByte;
           Send_Message(desiredright, desired_angle2);
-          desired_angle2 -= (180-angle2);
-          if (desired_angle2 > 0)
+          if (desired_angle2 - (180-angle2) > 0)
             direction2 = CLOCKWISE;
           else
             direction2 = COUNTERCLOCKWISE;
@@ -192,7 +189,6 @@ void loop() {
         }
         else if(state == 3){
           if(incomingByte == 0xFA){
-            digitalWrite(LEDPin, HIGH);
             state = 0;
           }
         }
@@ -200,20 +196,38 @@ void loop() {
     }
 
   if(intersect){
+    if(angle > desired_angle1){
+      Actual1 = 180-angle;
+      Desired1 = 180-desired_angle1;
+    }
+    else{
+      Actual1 = angle;
+      Desired1 = desired_angle1;
+    }
+    if((180-angle2) < desired_angle2){
+      Actual2 =  180-angle2;
+      Desired2 = desired_angle2;
+    }
+    else{
+      Actual2 = angle2;
+      Desired2 = 180-desired_angle2;
+    } 
+    PID1.Compute();
+    PID2.Compute();
     if(direction1 == CLOCKWISE){ //turn motor1 clockwise
-      analogWrite(CWPin, abs(desired_angle1)*20 < 255? abs(desired_angle1)*20 : 255);
+      analogWrite(CWPin, PIDOutput1);
       digitalWrite(CCWPin, LOW);
     }
     else{ //turn motor1 counterclockwise
-      analogWrite(CCWPin, abs(desired_angle1)*20 < 255? abs(desired_angle1)*20 : 255);
+      analogWrite(CCWPin, PIDOutput1);
       digitalWrite(CWPin, LOW);
     }
     if(direction2 == CLOCKWISE){ //turn motor2 clockwise
-      analogWrite(CWPin2, abs(desired_angle2)*20 > 255? abs(desired_angle2)*20 : 255);
+      analogWrite(CWPin2, PIDOutput2);
       digitalWrite(CCWPin2, LOW);
     }
     else{ //turn motor2 counterclockwise
-      analogWrite(CCWPin2, abs(desired_angle2)*20 > 255? abs(desired_angle2)*20 : 255);
+      analogWrite(CCWPin2, PIDOutput2);
       digitalWrite(CWPin2, LOW);
     }
   }
@@ -227,13 +241,91 @@ void loop() {
   
 #else  
   if((encoderPos != previousPos) || (encoderPos2 != previousPos2)){
-    Serial.print(encoderPos);
+   /* Serial.print(angle);
     Serial.print("\t");
-    Serial.println(encoderPos2);
+    Serial.println(angle2);*/
     previousPos = encoderPos;
     previousPos2 = encoderPos2;
+  }
+    if(angle > Desired1){
+      Actual1 = 180-angle;
+    }
+    else{
+      Actual1 = angle;
+    }
+    if(angle2 > 180-Desired2){
+      Actual2 = 180-angle2;
+    }
+    else{
+      Actual2 = angle2;
+    }  
+
+  Desired1 = 90;
+  Desired2 = 90;
+  PID2.Compute();
+  PID1.Compute();  //Run the PID loop
+  
+  analogWrite(CWPin, PIDOutput1);  //Write out the output from the PID loop to our LED pin
+  analogWrite(CWPin2, PIDOutput2);  //Write out the output from the PID loop to our LED pin
+  now = millis(); //Keep track of time
+  if(now - lastMessage > serialPing) {  //If its been long enough give us some info on serial
+    // this should execute less frequently
+    // send a message back to the mother ship
+    Serial.print("Setpoint1 = ");
+    Serial.print(Desired1);
+    Serial.print(" Input1 = ");
+    Serial.print(Actual1);
+    Serial.print(" Output1 = ");
+    Serial.print(PIDOutput1);
+    Serial.print(" Setpoint2 = ");
+    Serial.print(Desired2);
+    Serial.print(" Input2 = ");
+    Serial.print(Actual2);
+    Serial.print(" Output2 = ");
+    Serial.print(PIDOutput2);
+    Serial.print("\n");
+    if (Serial.available() > 0) { //If we sent the program a command deal with it
+      for (int x = 0; x < 7; x++) {
+        switch (x) {
+          case 0:
+            Kp1 = Serial.parseFloat();  
+            break;
+          case 1:
+            Ki1 = Serial.parseFloat();
+            break;
+          case 2:
+            Kd1 = Serial.parseFloat();
+            break;
+          case 3:
+            Kp2 = Serial.parseFloat();  
+            break;
+          case 4:
+            Ki2 = Serial.parseFloat();
+            break;
+          case 5:
+            Kd2 = Serial.parseFloat();
+            break;
+          case 6:
+            for (int y = Serial.available(); y == 0; y--) {
+              Serial.read();  //Clear out any residual junk
+            }
+            break;
+        }
+      }
+      Serial.print(" Kp,Ki,Kd = ");
+      Serial.print(Kp1);
+      Serial.print(",");
+      Serial.print(Ki1);
+      Serial.print(",");
+      Serial.println(Kd1);  //Let us know what we just received
+      PID1.SetTunings(Kp1, Ki1, Kd1); //Set the PID gain constants and start running
+      PID2.SetTunings(Kp2, Ki2, Kd2); //Set the PID gain constants and start running
+    }
+    
+    lastMessage = now; 
+    //update the time stamp. 
   }  
-#endif DEBUG
+#endif //DEBUG
 
 }
 void ISR_GPIO()

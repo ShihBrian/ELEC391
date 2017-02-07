@@ -43,6 +43,7 @@ class eMsgType(Enum):
     encoderPosRight = 2
     desiredLeft = 3
     desiredRight = 4
+    debug = 5
     
 PauseByte = b"\xFE"
 IntersectTrue = b"\xFF"
@@ -76,7 +77,7 @@ intersect_time = time.time()
 intersect_delay = 1
 start_time = time.time()
 start_time2 = time.time()*1000
-time2_delay = 100
+time2_delay = 500
 
 class StatusBar(Frame):
 
@@ -134,7 +135,6 @@ def rectIntersect(pX, pY):
             desired_y = cBLy+1
         if start_time2+time2_delay < time.time()*1000:
             angle1, angle2 = inverse_kinematic(desired_x-75, desired_y)
-            print(angle1, " ", angle2)
             ser.write(b"\xFB")
             value = [int(angle1)]
             angle = bytes(value)
@@ -289,7 +289,8 @@ def MsgHandler(Msgtype, data):
         stDesired1.set("%d", data)
     elif Msgtype == eMsgType.desiredRight:
         stDesired2.set("%d", data)
-
+    elif Msgtype == eMsgType.debug:
+        print(data)
 def fk_solve():
     global x_c, y_c, angle1, angle2
     
@@ -320,6 +321,8 @@ def main():
                 MsgType = eMsgType.desiredLeft
             elif x == 4:
                 MsgType = eMsgType.desiredRight
+            elif x == 5:
+                MsgType = eMsgType.debug
             state = States.RxMsgLength
         elif state == States.RxMsgLength: #receive message length, 1 byte
             x = int(ser.read(1),16)
