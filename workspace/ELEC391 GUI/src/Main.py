@@ -17,17 +17,23 @@ from scipy.optimize import fsolve
 #==============Plot Globals===============#
 wHeight = 508
 wWidth = 501
+x_range = 160
+y_start = 60
+y_end = 160
+y_range = y_end - y_start
 style.use("ggplot")
 f = Figure(figsize=(5.4,5.3), dpi=120)
 a = f.add_subplot(111)
 b = f.add_subplot(111)
-a.set_xlim([-75,75])
-a.set_ylim([0,125])
+a.set_xlim([-1*x_range/2,x_range/2])
+a.set_ylim([y_start,y_end])
 x_c = 0
 y_c = 0
-AL = 55
+AL = 80
 angle1 = 90
 angle2 = 90
+x_conv =(wWidth/x_range)
+y_conv = (wWidth/y_range)
 #=========================================#
 
 #=========Communication Globals===========#
@@ -61,11 +67,10 @@ success_count = 0
 class Shape(Enum):
     Rectangle = 1
     Circle = 2
-
-sqX=-20
-sqY=60
-sqL=40
-sqH=30
+sqX=-10
+sqY=130
+sqL=20
+sqH=10
 circR = 25
 circX = 125
 circY = 125
@@ -95,16 +100,16 @@ class StatusBar(Frame):
         self.label.update_idletasks()
 
 def draw_constraint(shape): 
-    global sqX, sqY, sqL, sqH, circX, circY, circR, curr_shape
-    w.delete(ALL)
+    global sqX, sqY, sqL, sqH, circX, circY, circR, curr_shape, rectangle
+    w.delete(rectangle)
     curr_shape = shape
-    sqX = abs(sqX+75)
+    sqX = abs(sqX+x_range/2)
     if shape == Shape.Rectangle:
-        w.create_rectangle(sqX*(wWidth/150),wHeight-sqY*(wHeight/125),(sqX+sqL)*(wWidth/150),\
-                            wHeight-(sqY+sqH)*(wHeight/125), fill="lightblue")
+        rectangle = w.create_rectangle(sqX*x_conv,wHeight-sqY*y_conv+(y_conv*y_start),(sqX+sqL)*x_conv,\
+                            wHeight-(sqY+sqH)*y_conv+(y_conv*y_start), fill="lightblue")
         create_entry(Shape.Rectangle)
     if shape == Shape.Circle:
-        w.create_oval((circX-circR)*(wWidth/150),wHeight-(circY-circR)*(wWidth/150),\
+        circle = w.create_oval((circX-circR)*x_conv,wHeight-(circY-circR)*y_conv,\
                       (circX+circR)*(wWidth/150),wHeight-(circY+circR)*(wWidth/150), fill="lightblue")
         create_entry(Shape.Circle)
 
@@ -134,7 +139,9 @@ def rectIntersect(pX, pY):
             desired_x = pX
             desired_y = cBLy+1
         if start_time2+time2_delay < time.time()*1000:
-            angle1, angle2 = inverse_kinematic(desired_x-75, desired_y)
+            angle1, angle2 = inverse_kinematic(desired_x-(x_range/2), desired_y)
+            stDesired1.set("%d", angle1)
+            stDesired2.set("%d", angle2)            
             ser.write(b"\xFB")
             value = [int(angle1)]
             angle = bytes(value)
@@ -238,11 +245,25 @@ def init_serial():
     return ser
 
 def draw_point(x,y):
-    global rect, pause
+    global rect, pause, angle2, line1,line2,line3,line4, x_conv, y_conv, restrict
     if pause == 0:
         w.delete(rect)
-        rect = w.create_rectangle(x-1,507-y-1,x+3,507-y+3, fill="blue", outline="")
-
+        w.delete(line1)
+        w.delete(line2)
+        w.delete(line3)
+        w.delete(line4)
+        w.delete(restrict)
+        line1x = x_conv*((x_range/4)+AL*math.cos(math.radians(angle1)))
+        line1y = wHeight-y_conv*(AL*math.sin(math.radians(angle1)))
+        line2x = x_conv*((x_range*0.75)+AL*math.cos(math.radians(180-angle2)))
+        line2y = wHeight-y_conv*(AL*math.sin(math.radians(180-angle2)))
+        restrict = w.create_rectangle(0,wHeight-120*y_conv+(y_conv*y_start),wWidth,wHeight, fill = "light salmon", outline = "")
+        rect = w.create_rectangle(x-1,wHeight-y-1,x+3,wHeight-y+3, outline="")
+        line1 = w.create_line(x_conv*(x_range/4), wHeight+(y_conv*y_start), line1x, line1y+(y_conv*y_start), width=7 )
+        line2 = w.create_line(x_conv*(x_range*0.75), wHeight+(y_conv*y_start), line2x, line2y+(y_conv*y_start), width=7 )
+        line3 = w.create_line(line1x, line1y+(y_conv*y_start),x,wHeight-y+(y_conv*y_start), width=7 )
+        line4 = w.create_line(line2x, line2y+(y_conv*y_start),x, wHeight-y+(y_conv*y_start), width=7 )
+        
 def pause_update():
     ser.write(PauseByte)
 
@@ -282,24 +303,25 @@ def MsgHandler(Msgtype, data):
         stAngle1.set("%.1lf", angle1)
         fk_solve()
     elif Msgtype == eMsgType.encoderPosRight:
-        angle2 = 180-data*0.9
+        angle2 = data*0.9
         stAngle2.set("%.1lf", angle2)
         fk_solve()  
     elif Msgtype == eMsgType.desiredLeft:
-        stDesired1.set("%d", data)
+        #stDesired1.set("%d", data)
+        pass
     elif Msgtype == eMsgType.desiredRight:
-        stDesired2.set("%d", data)
+        #stDesired2.set("%d", data)
+        pass
     elif Msgtype == eMsgType.debug:
         print(data)
 def fk_solve():
     global x_c, y_c, angle1, angle2
-    
     a,b = fsolve(forward_kinematic,(0,0))
     x_c = AL*(math.cos(math.radians(angle1))+math.cos(a))-(AL/2)
     y_c = AL*(math.sin(math.radians(angle1))+math.sin(a))    
     stXCoord.set("%d", x_c)
     stYCoord.set("%d", y_c)               
-    draw_point((x_c*10+750)*.334,y_c*4.064)
+    draw_point(x_conv*(x_c+(x_range/2)), y_conv*y_c)
  
 def main():
     global state, success_count, x_c, y_c, MsgLength, MsgType, data
@@ -347,7 +369,7 @@ def main():
     stRcvSuccess.set("%d", success_count)
     
     if curr_shape == Shape.Rectangle:
-        rectIntersect(x_c+75, y_c)
+        rectIntersect(x_c+(x_range/2), y_c)
     elif curr_shape == Shape.Circle:
         circIntersect(x_c, y_c)
     
@@ -377,6 +399,12 @@ stDesired2.place(x=770, y=180)
 w = Canvas(root, width=wWidth, height=wHeight, highlightthickness = 0)
 w.place(x=82,y=98)
 rect = w.create_rectangle(0,0,0,0, fill="blue")
+line1 = w.create_line(0,0,0,0)
+line2 = w.create_line(0,0,0,0)
+line3 = w.create_line(0,0,0,0)
+line4 = w.create_line(0,0,0,0)
+restrict = w.create_rectangle(0,0,0,0)
+rectangle = w.create_rectangle(0,0,0,0)
 #-----------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------
 entryX = Entry(root, width = 5)
@@ -405,7 +433,7 @@ root.mainloop()
 #more shapes
 #images
 #custom shapes   
-#display extension length of actuator
 #multiple shapes at once
 #bind keys to do something
 #choose spring, wall, button, etc 
+#keep in/keep out
