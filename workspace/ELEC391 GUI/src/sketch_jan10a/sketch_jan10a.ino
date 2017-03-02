@@ -2,33 +2,31 @@
 #include <SoftwareSerial.h>
 #include <math.h>
 
-#define LEDPin 13
 #define CWPinL 4
 #define CCWPinL 5
 #define CWPinR 6
 #define CCWPinR 7
 
+#define REED1 46
+#define REED2 47
+
 //#define DEBUG
+//#define LOCAL_OUTPUT
 SoftwareSerial mySerial(10,11);
 /*===============================*/
 //Globals for optical encoder
-#define ENCODERAPIN 2 //interrupt
-#define ENCODERBPIN 3 //can be interrupt for better performance Pin 2, 3, 18, 19, 20, 21
-#define ENCODERAPIN2 18
-#define ENCODERBPIN2 19
 #define CPR 400 //400 ticks per 360 degrees
 #define CLOCKWISE 1
 #define COUNTERCLOCKWISE 2
-volatile long encoderPos = 100.0;
-volatile long encoderPos2 = 100.0;
-volatile long interruptsReceived = 0;
-volatile long interruptsReceived2 = 0;
+volatile long encoderPos = 0;
+volatile long encoderPos2 = 0;
 short currentdirection = CLOCKWISE;
 long previousPos = 0;
 volatile double angle = 90.0;
 short currentdirection2 = CLOCKWISE;
 long previousPos2 = 0;
 volatile double angle2 = 90.0;
+volatile long countData = 0;
 /*===============================*/
 
 /*===============================*/
@@ -49,9 +47,9 @@ enum MsgType{
 
 /*===============================*/
 //PID globals
-float Kp = 10;
+float Kp = 100;
 float Ki = 0;
-float Kd = 0;
+float Kd = 10;
 double Desired1,PIDOutput1;
 double Desired2,PIDOutput2;
 double Actual1 = 90.0;
@@ -62,6 +60,9 @@ const int sampleRate = 10; // Variable that determines how fast our PID loop run
 const long serialPing = 1000;
 unsigned long now = 0;
 unsigned long lastMessage = 0;
+int rxPID = false;
+int PIDrx_count = 0;
+int P, I, D;
 /*===============================*/
 
 unsigned long tick_start = millis();
@@ -80,65 +81,44 @@ void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
   Serial.setTimeout(10);
-  pinMode(ENCODERAPIN, INPUT);
-  pinMode(ENCODERBPIN, INPUT);
-  pinMode(ENCODERAPIN2, INPUT);
-  pinMode(ENCODERBPIN2, INPUT);
-  pinMode(LEDPin, OUTPUT);
   pinMode(CCWPinL, OUTPUT);
   pinMode(CWPinL, OUTPUT);
   pinMode(CCWPinR, OUTPUT);
   pinMode(CWPinR, OUTPUT);
-  attachInterrupt(digitalPinToInterrupt(ENCODERAPIN),ISR_GPIO, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENCODERBPIN),ISR_GPIO2, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENCODERAPIN2),ISR_GPIO3, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENCODERBPIN2),ISR_GPIO4, CHANGE);
+  pinMode(9, OUTPUT);
+  pinMode(REED1, INPUT_PULLUP);
+  pinMode(REED2, INPUT_PULLUP);
+  digitalWrite(9, LOW); // /RST resets the internal counter between runs
+  delay(10);
+  digitalWrite(9, HIGH); // Stay high for rest of the run
+  // Set all pins in PORTA and C (digital pins 22->37) as input pins
+  for(int i = 22; i<38; i++) {
+    pinMode(i, INPUT);
+  }
+  // Set pins 5,6,7 in PORT B (digital pins 11->16) as output pins
+  for(int j = 11; j<17; j++) {
+    pinMode(j, OUTPUT);
+    digitalWrite(j, LOW);
+    
+  }
   PID1.SetMode(AUTOMATIC);
   PID2.SetMode(AUTOMATIC);
   PID1.SetSampleTime(sampleRate);
   PID2.SetSampleTime(sampleRate);
-  while(!Serial){
+  while(!Serial){ //wait for serial to be initialized
   }
   delay(100);
 }
 
-int get_length(long data){
-  if(int(data/16) == 0){
-    return 1;
-  }
-  else if(int(data/16) < 16){
-    return 2;
-  }
-  else{
-    return 3;
-  } 
-}
-
-void Send_Message(MsgType type,long data){
-  int data_length = get_length(data);
-  Serial.print(startbyte, HEX);
-  Serial.print(type, HEX);
-  Serial.print(data_length, HEX);
-  Serial.print(data, HEX);
-  Serial.print(endbyte, HEX);
-}
-
-void all_off(){
-  digitalWrite(CWPinL, LOW);
-  digitalWrite(CCWPinL, LOW);
-  digitalWrite(CWPinR, LOW);
-  digitalWrite(CCWPinR, LOW);      
-}
-
-int tries = 0;
-
 void loop() {
-#ifndef DEBUG
+#ifndef DEBUG //main loop 
+  static int tries = 0;
   curr_tick = millis();
   if(!pause){
-    if(curr_tick-tickms >= tick_start){
+    if(curr_tick-tickms >= tick_start){ //run loop every tickms 
+      ISR_Counter(); //get new encoder positions
       if((previousPos != encoderPos)||(previousPos2 != encoderPos2)){
-        if(tries == 2){
+        if(tries == 2){ //send message every second encoderPos change
           Send_Message(encoderleft, encoderPos); 
           previousPos = encoderPos;
           Send_Message(encoderright, encoderPos2); 
@@ -153,8 +133,29 @@ void loop() {
     }
   }
 
-  if(Serial.available()>0){
+  if(Serial.available()>0) {
     incomingByte = Serial.read();
+    
+    if(rxPID == true){
+      if(PIDrx_count == 0){
+        P = incomingByte;
+      }
+      else if(PIDrx_count == 1)
+        I = incomingByte;
+      else if(PIDrx_count == 2)
+        D = incomingByte;
+      PIDrx_count++;
+      if(PIDrx_count == 3){
+        PIDrx_count = 0;
+        rxPID = false;
+        PID1.SetTunings(P,I,D);
+        PID2.SetTunings(P,I,D);
+        Send_Message(debug, P);
+        Send_Message(debug, I);
+        Send_Message(debug, D);
+      } 
+    }
+    
     if(incomingByte == 0xFF){     
       intersect = true;
     }
@@ -166,6 +167,10 @@ void loop() {
     else if(incomingByte == 0xFE){
       pause = !pause;
     }
+    else if(incomingByte == 0xFC){
+      rxPID = true;
+    }
+    
     if(intersect){
         if (state == 0){
           if(incomingByte == 0xFB){
@@ -187,316 +192,208 @@ void loop() {
         }
       }
     }
-
-    if(angle > desired_angle1){
-      Actual1 = 180-angle;
-      Desired1 = 180-desired_angle1;
-      direction1 = CLOCKWISE;
-    }
-    else{
-      Actual1 = angle;
-      Desired1 = desired_angle1; 
-      direction1 = COUNTERCLOCKWISE;
-    }
-    if(angle2 > desired_angle2){
-      Actual2 = 180-angle2;
-      Desired2 = 180-desired_angle2;
-      direction2 = COUNTERCLOCKWISE;
-    }
-    else{
-      Actual2 = angle2;
-      Desired2 = desired_angle2;
-      direction2 = CLOCKWISE;
-    } 
-
-  if(intersect){
-    PID2.Compute();
-    PID1.Compute();  //Run the PID loop
-    if (direction1 == CLOCKWISE){
-      analogWrite(CWPinL, PIDOutput1>100? 100 : PIDOutput1);  //Write out the output from the PID loop to our LED pin
-      digitalWrite(CCWPinL, LOW);
-    }
-    else{
-      analogWrite(CCWPinL, PIDOutput1>100? 100 : PIDOutput1);
-      digitalWrite(CWPinL, LOW);
-    }
-    if (direction2 == CLOCKWISE){
-      analogWrite(CWPinR, PIDOutput2>100? 100 : PIDOutput2);  //Write out the output from the PID loop to our LED pin
-      digitalWrite(CCWPinR, LOW);
-    }
-    else{
-      analogWrite(CCWPinR, PIDOutput2>100? 100 : PIDOutput2);
-      digitalWrite(CWPinR, LOW);
-    }
-    
-    if(encoderPos > 199 || encoderPos < 1 || encoderPos2 > 199 || encoderPos2 < 1  ){
-      all_off(); 
-    }
-  }
+    //pass values to PID library to compute output power
+    PID_Output(intersect, desired_angle1, desired_angle2);
   
-#else  
-  static int iter = 0;
-  if((encoderPos != previousPos) || (encoderPos2 != previousPos2)){
-    /*Serial.print(angle);
-    Serial.print("\t");
-    Serial.println(angle2);*/
-    previousPos = encoderPos;
-    previousPos2 = encoderPos2;
-  }
-    if(angle > desired_angle1){
-      Actual1 = 180-angle;
-      Desired1 = 180-desired_angle1;
-      direction1 = CLOCKWISE;
-    }
-    else{
-      Actual1 = angle;
-      Desired1 = desired_angle1; 
-      direction1 = COUNTERCLOCKWISE;
-    }
-    if(angle2 > desired_angle2){
-      Actual2 = 180-angle2;
-      Desired2 = 180-desired_angle2;
-      direction2 = COUNTERCLOCKWISE;
-    }
-    else{
-      Actual2 = angle2;
-      Desired2 = desired_angle2;
-      direction2 = CLOCKWISE;
-    } 
-
-  PID2.Compute();
-  PID1.Compute();  //Run the PID loop
-  if (direction1 == CLOCKWISE){
-    analogWrite(CWPinL, PIDOutput1>50? 50 : PIDOutput1);  //Write out the output from the PID loop to our LED pin
-  }
-  else{
-    analogWrite(CCWPinL, PIDOutput1>50? 50 : PIDOutput1);
-  }
-  if (direction2 == CLOCKWISE){
-    analogWrite(CWPinR, PIDOutput2>50? 50 : PIDOutput2);  //Write out the output from the PID loop to our LED pin
-  }
-  else{
-    analogWrite(CCWPinR, PIDOutput2>50? 50 : PIDOutput2);
-  }
+#else  //for debugging and testing PID
+  /*static int iter = 0;
+  ISR_Counter();
+  PID_Output(true, desired_angle1, desired_angle2);
+  
   now = millis(); //Keep track of time
-  if(now - lastMessage > serialPing) {  //If its been long enough give us some info on serial
+  if(now - lastMessage > serialPing) { //Move arm to new position every serialPing ms
     if (iter== 2){
       desired_angle1 = 160;
       desired_angle2 = 68;
-      all_off()
+      all_off();
     }
     else if(iter ==4){
       desired_angle1 = 68;
       desired_angle2 = 160;     
-      all_off()
+      all_off();
     }
     else if(iter==6){
       desired_angle1 = 90;
       desired_angle2 = 90;     
-      all_off()
+      all_off();
     }
     else if(iter ==8){
       desired_angle1 = 121;
       desired_angle2 = 121;     
-      all_off()
+      all_off();
       iter = 0;
     }
     iter++;   
-    // this should execute less frequently
-    // send a message back to the mother ship
-    Serial.print("Setpoint1 = ");
-    Serial.print(Desired1);
-    Serial.print(" Input1 = ");
-    Serial.print(Actual1);
-    Serial.print(" Output1 = ");
-    Serial.print(PIDOutput1);
-    Serial.print(" Direc1 = ");
-    Serial.print(direction1);
-    Serial.print(" Setpoint2 = ");
-    Serial.print(Desired2);
-    Serial.print(" Input2 = ");
-    Serial.print(Actual2);
-    Serial.print(" Output2 = ");
-    Serial.print(PIDOutput2);
-    Serial.print(" Direc2 = ");
-    Serial.print(direction2);
-    Serial.print("\n");
-    if (Serial.available() > 0) { //If we sent the program a command deal with it
-      for (int x = 0; x < 4; x++) {
-        switch (x) {
-          case 0:
-            Kp = Serial.parseFloat();  
-            break;
-          case 1:
-            Ki = Serial.parseFloat();
-            break;
-          case 2:
-            Kd = Serial.parseFloat();
-            break;
-          case 3:
-            for (int y = Serial.available(); y == 0; y--) {
-              Serial.read();  //Clear out any residual junk
-            }
-            break;
-        }
-      }
-      Serial.print(" Kp,Ki,Kd = ");
-      Serial.print(Kp1);
-      Serial.print(",");
-      Serial.print(Ki1);
-      Serial.print(",");
-      Serial.println(Kd1);  //Let us know what we just received
-      PID1.SetTunings(Kp, Ki, Kd); //Set the PID gain constants and start running
-      PID2.SetTunings(Kp, Ki, Kd); //Set the PID gain constants and start running
-    }
-    
     lastMessage = now; 
-    //update the time stamp. 
-  }  
+  }  */
+  int prox = digitalRead(REED1);
+  int prox2 = digitalRead(REED2);
+  if(prox == HIGH){
+    //Serial.print("Centered");
+  }
+  else{
+    //Serial.print("Not Centered");
+  }
+  if(prox2 == HIGH){
+    Serial.println("OPEN");
+  }
+  else{
+    Serial.println("CLOSED");
+  }
 #endif //DEBUG
 
-}
-void ISR_GPIO()
-{
-  if (digitalRead(ENCODERAPIN) == HIGH) { 
-
-    // check channel B to see which way encoder is turning
-    if (digitalRead(ENCODERBPIN) == LOW) { 
-      encoderPos = encoderPos + 1;         // CW
-      currentdirection = CLOCKWISE;
-    } 
-    else {
-      encoderPos = encoderPos - 1;         // CCW
-      currentdirection = COUNTERCLOCKWISE;
-    }
+#ifdef LOCAL_OUTPUT //for outputting encoder information on local arduino serial
+  if((encoderPos != previousPos) || (encoderPos2 != previousPos2)){
+    Serial.print(angle);
+    Serial.print("\t");
+    Serial.println(angle2);
+    previousPos = encoderPos;
+    previousPos2 = encoderPos2;
   }
-
-  else   // must be a high-to-low edge on channel A                                       
-  { 
-    // check channel B to see which way encoder is turning  
-    if (digitalRead(ENCODERBPIN) == HIGH) {   
-      encoderPos = encoderPos + 1;          // CW
-      currentdirection = CLOCKWISE;
-    } 
-    else {
-      encoderPos = encoderPos - 1;          // CCW
-      currentdirection = COUNTERCLOCKWISE;
-    }
-  }
- 
- 
-  // track 0 to 400
-  encoderPos = encoderPos % CPR;
-
-  angle = 0.9 * encoderPos;
- 
-  // track the number of interrupts
-  interruptsReceived++;
+#endif //LOCAL_OUTPUT
 }
 
-void ISR_GPIO2(){
-  // look for a low-to-high on channel B
-  if (digitalRead(ENCODERBPIN) == HIGH) {   
+void PID_Output(bool flag, int desired_angle1, int desired_angle2){
+    if (flag){
+      //figure out if desired angle is larger or smaller than actual and set direction to turn motor
+      if(angle > desired_angle1){
+        Actual1 = 180-angle;
+        Desired1 = 180-desired_angle1;
+        direction1 = CLOCKWISE;
+      }
+      else{
+        Actual1 = angle;
+        Desired1 = desired_angle1; 
+        direction1 = COUNTERCLOCKWISE;
+      }
+      if(angle2 > desired_angle2){
+        Actual2 = 180-angle2;
+        Desired2 = 180-desired_angle2;
+        direction2 = COUNTERCLOCKWISE;
+      }
+      else{
+        Actual2 = angle2;
+        Desired2 = desired_angle2;
+        direction2 = CLOCKWISE;
+      } 
+      //Run PID computation
+      PID1.Compute();
+      PID2.Compute();
+      //Turn on pin according to direction and PID output. Limit to 255 
+      if (direction1 == CLOCKWISE){
+        analogWrite(CWPinL, PIDOutput1>255? 255 : PIDOutput1);
+        digitalWrite(CCWPinL, LOW);
+      }
+      else{
+        analogWrite(CCWPinL, PIDOutput1>255? 255 : PIDOutput1);
+        digitalWrite(CWPinL, LOW);
+      }
+      if (direction2 == CLOCKWISE){
+        analogWrite(CWPinR, PIDOutput2>255? 255 : PIDOutput2);
+        digitalWrite(CCWPinR, LOW);
+      }
+      else{
+        analogWrite(CCWPinR, PIDOutput2>255? 255 : PIDOutput2);
+        digitalWrite(CWPinR, LOW);
+      }
 
-   // check channel A to see which way encoder is turning
-    if (digitalRead(ENCODERAPIN) == HIGH) {  
-      encoderPos = encoderPos + 1;         // CW
-      currentdirection = CLOCKWISE;
-    } 
-    else {
-      encoderPos = encoderPos - 1;         // CCW
-      currentdirection = COUNTERCLOCKWISE;
+      //dont want arm going past 0 or 180 degrees
+      if(encoderPos > 199 || encoderPos < 1 || encoderPos2 > 199 || encoderPos2 < 1  ){
+        all_off(); 
+      }
     }
-  }
-  // Look for a high-to-low on channel B
-  else { 
-    // check channel B to see which way encoder is turning  
-    if (digitalRead(ENCODERAPIN) == LOW) {   
-      encoderPos = encoderPos + 1;          // CW
-      currentdirection = CLOCKWISE;
-    } 
-    else {
-      encoderPos = encoderPos - 1;          // CCW
-      currentdirection = COUNTERCLOCKWISE;
-    }
-  }
-  // track 0 to 100
-  encoderPos = encoderPos % CPR;
-
-  angle = 0.9 * encoderPos;
- 
-  // track the number of interrupts
-  interruptsReceived++;
-}
-void ISR_GPIO3()
-{
-  if (digitalRead(ENCODERAPIN2) == HIGH) { 
-
-    // check channel B to see which way encoder is turning
-    if (digitalRead(ENCODERBPIN2) == LOW) { 
-      encoderPos2 = encoderPos2 + 1;         // CW
-      currentdirection2 = CLOCKWISE;
-    } 
-    else {
-      encoderPos2 = encoderPos2 - 1;         // CCW
-      currentdirection2 = COUNTERCLOCKWISE;
-    }
-  }
-
-  else   // must be a high-to-low edge on channel A                                       
-  { 
-    // check channel B to see which way encoder is turning  
-    if (digitalRead(ENCODERBPIN2) == HIGH) {   
-      encoderPos2 = encoderPos2 + 1;          // CW
-      currentdirection2 = CLOCKWISE;
-    } 
-    else {
-      encoderPos2 = encoderPos2 - 1;          // CCW
-      currentdirection2 = COUNTERCLOCKWISE;
-    }
-  }
- 
- 
-  // track 0 to 400
-  encoderPos = encoderPos % CPR;
-
-  angle2 = 0.9 * encoderPos2;
- 
-  // track the number of interrupts
-  interruptsReceived2++;
 }
 
-void ISR_GPIO4(){
-  // look for a low-to-high on channel B
-  if (digitalRead(ENCODERBPIN2) == HIGH) {   
+//function to read 32bit data from encoder chip
+void ISR_Counter(){
+  digitalWrite(13, HIGH); // Set OE to HIGH (disable)
+  
+  digitalWrite(11, LOW);
+  digitalWrite(12, HIGH); // SEL1 = 0 and SEL2 = 1
+  
+  digitalWrite(13, LOW); // Set OE to LOW (enable)
+  byte MSBresult = getbyte();
+  byte MSBresult2 = getbyte2();
+  
+  digitalWrite(11, HIGH);
+  digitalWrite(12, HIGH); // SEL1 = 1 and SEL2 = 1
+  byte secondResult = getbyte();
+  byte secondResult2 = getbyte2();
+  
+  digitalWrite(11, LOW);
+  digitalWrite(12, LOW); // SEL1 = 0 and SEL2 = 0
+  byte thirdResult = getbyte();
+  byte thirdResult2 = getbyte2();
+  
+  digitalWrite(11, HIGH);
+  digitalWrite(12, LOW); // SEL1 = 1 and SEL2 = 0
+  byte LSBresult = getbyte();
+  byte LSBresult2 = getbyte2();
 
-   // check channel A to see which way encoder is turning
-    if (digitalRead(ENCODERAPIN2) == HIGH) {  
-      encoderPos2 = encoderPos2 + 1;         // CW
-      currentdirection2 = CLOCKWISE;
-    } 
-    else {
-      encoderPos2 = encoderPos2 - 1;         // CCW
-      currentdirection2 = COUNTERCLOCKWISE;
-    }
-  }
-  // Look for a high-to-low on channel B
-  else { 
-    // check channel B to see which way encoder is turning  
-    if (digitalRead(ENCODERAPIN2) == LOW) {   
-      encoderPos2 = encoderPos2 + 1;          // CW
-      currentdirection2 = CLOCKWISE;
-    } 
-    else {
-      encoderPos2 = encoderPos2 - 1;          // CCW
-      currentdirection2 = COUNTERCLOCKWISE;
-    }
-  }
-  // track 0 to 100
-  encoderPos = encoderPos % CPR;
+  digitalWrite(13, HIGH); // Set OE to HIGH (disable)
+  
+  encoderPos = 100+mergeFunc(MSBresult, secondResult, thirdResult, LSBresult);
+  encoderPos2 = 100+mergeFunc(MSBresult2, secondResult2, thirdResult2, LSBresult2);
 
-  angle2 = 0.9 * encoderPos2;
- 
-  // track the number of interrupts
-  interruptsReceived2++;
+  angle = (encoderPos *0.9);
+  angle2 = (encoderPos2*0.9);
+}
+
+//get length of data being sent out
+int get_length(long data){
+  if(int(data/16) == 0){
+    return 1;
+  }
+  else if(int(data/16) < 16){
+    return 2;
+  }
+  else{
+    return 3;
+  } 
+}
+//Send message in the following order: startbyte, type, length, data, endbyte
+void Send_Message(MsgType type,long data){
+  int data_length = get_length(data);
+  Serial.print(startbyte, HEX);
+  Serial.print(type, HEX);
+  Serial.print(data_length, HEX);
+  Serial.print(data, HEX);
+  Serial.print(endbyte, HEX);
+}
+//turn all motor control pins off
+void all_off(){
+  digitalWrite(CWPinL, LOW);
+  digitalWrite(CCWPinL, LOW);
+  digitalWrite(CWPinR, LOW);
+  digitalWrite(CCWPinR, LOW);      
+}
+
+//function to get individual bytes from encoder chip
+byte getbyte(){
+/*Get stable data for the most significant byte of countData*/
+  byte MSBold = PINA;       // read datapins D0->D7 and store in MSBold
+  byte MSBnew = PINA;       // read again immediatly after to assure stable data
+  if (MSBnew == MSBold){ 
+    byte MSBresult = MSBnew;
+    return MSBresult;  
+  }
+  else getbyte();
+}
+byte getbyte2(){
+/*Get stable data for the most significant byte of countData*/
+  byte MSBold = PINC;       // read datapins D0->D7 and store in MSBold
+  byte MSBnew = PINC;       // read again immediatly after to assure stable data
+  if (MSBnew == MSBold){ 
+    byte MSBresult = MSBnew;
+    return MSBresult;  
+  }
+  else getbyte();
+}
+//merge 4 bytes into a signed 32bit value
+long mergeFunc(byte MSBresult, byte secondResult, byte thirdResult, byte LSBresult){
+/*Merges the 4 bytes returning one 32-bit variable called countData*/
+  long tempVar = 0;
+  tempVar |= ((long) MSBresult << 24) | ((long) secondResult << 16) | ((long) thirdResult << 8) | ((long) LSBresult << 0);
+  countData = tempVar;
+  return countData;
 }
