@@ -35,6 +35,8 @@ angle1 = 90
 angle2 = 90
 x_conv =(wWidth/x_range)
 y_conv = (wWidth/y_range)
+mouse_x = 0
+mouse_y = 0
 #=========================================#
 
 #=========Communication Globals===========#
@@ -73,10 +75,15 @@ sqX=-15
 sqY=85
 sqL=30
 sqH=40
+default_sqX=-15
+default_sqY=85
+default_sqL=30
+default_sqH=40
 circR = 25
 circX = 125
 circY = 125
 curr_shape = Shape.Rectangle
+manual_pos = 0;
 #==========================================#
 
 #==============PID Globals=================#
@@ -112,8 +119,9 @@ class StatusBar(Frame):
         self.label.config(text="")
         self.label.update_idletasks()
 
-def draw_constraint(shape): 
-    global sqX, sqY, sqL, sqH, circX, circY, circR, curr_shape, rectangle
+def draw_constraint(shape, sqX, sqY, sqL, sqH): 
+    global circX, circY, circR, curr_shape, rectangle, manual_pos
+    manual_pos = 0
     w.delete(rectangle)
     curr_shape = shape
     sqX = abs(sqX+x_range/2)
@@ -221,7 +229,7 @@ def entry_callback(event):
             circR = int(entryLength.get())
             circX = int(entryX.get())
             circY = int(entryY.get())
-        draw_constraint(curr_shape) 
+        draw_constraint(curr_shape, sqX, sqY, sqL, sqH) 
     if len(entryP.get()) != 0:
         Set_PID(entryP.get(),entryI.get(),entryD.get())
 
@@ -235,7 +243,7 @@ def Set_PID(P,I,D):
     ser.write(txD)
     
 def create_buttons(root):
-    ttk.Button(root, text="Square", command=lambda: draw_constraint(Shape.Rectangle)).place(x=0,y=0)
+    ttk.Button(root, text="Square", command=lambda: draw_constraint(Shape.Rectangle, default_sqX, default_sqY, default_sqL, default_sqH)).place(x=0,y=0)
     ttk.Button(root, text="Circle", command=lambda: draw_constraint(Shape.Circle)).place(x=75,y=0)
     ttk.Button(root, text="Pause", command=lambda: pause_update()).place(x=500,y=0)
     ttk.Button(root, text="Clear", command=lambda: clear()).place(x=575,y=0)
@@ -263,12 +271,13 @@ def init_window():
     toolbar = NavigationToolbar2TkAgg(canvas, root)
     toolbar.update()
     canvas._tkcanvas.place(x=0,y=35)
+    canvas.callbacks.connect('button_press_event', on_click)
     return root 
  
 def init_serial():
     ser = serial.Serial()
     ser.baudrate = 115200
-    ser.port = 'COM6'
+    ser.port = 'COM4'
     ser.timeout = 1
     ser.open()
     return ser
@@ -305,6 +314,21 @@ def clear():
 def close(event):
     sys.exit()
 
+def on_click(event):
+    global mouse_x, mouse_y, manual_pos
+    mouse_x = event.x
+    mouse_y = event.y
+    manual_pos = 1
+    clear()
+    ser.write(b"\xFB")
+    value = [int(angle1)]
+    angle = bytes(value)
+    ser.write(angle)
+    value = [int(angle2)]
+    angle = bytes(value)
+    ser.write(angle)
+    ser.write(b"\xFA")
+    
 def forward_kinematic(p):
     global angle1, angle2
     alpha,beta = p
@@ -325,6 +349,15 @@ def inverse_kinematic(x,y):
     right_angle = math.degrees(right_outer_angle + right_inner_angle)
     return left_angle, right_angle
 
+def fk_solve():
+    global x_c, y_c, angle1, angle2
+    a,b = fsolve(forward_kinematic,(0,0))
+    x_c = AL*(math.cos(math.radians(angle1))+math.cos(a))-(AL/2)
+    y_c = AL*(math.sin(math.radians(angle1))+math.sin(a))    
+    stXCoord.set("%d", x_c)
+    stYCoord.set("%d", y_c)               
+    draw_point(x_conv*(x_c+(x_range/2)), y_conv*y_c)
+ 
 def MsgHandler(Msgtype, data):
     global angle1, angle2
     if Msgtype == eMsgType.encoderPosLeft:
@@ -344,17 +377,8 @@ def MsgHandler(Msgtype, data):
     elif Msgtype == eMsgType.debug:
         print(data)
         
-def fk_solve():
-    global x_c, y_c, angle1, angle2
-    a,b = fsolve(forward_kinematic,(0,0))
-    x_c = AL*(math.cos(math.radians(angle1))+math.cos(a))-(AL/2)
-    y_c = AL*(math.sin(math.radians(angle1))+math.sin(a))    
-    stXCoord.set("%d", x_c)
-    stYCoord.set("%d", y_c)               
-    draw_point(x_conv*(x_c+(x_range/2)), y_conv*y_c)
- 
 def main():
-    global state, success_count, x_c, y_c, MsgLength, MsgType, data
+    global state, success_count, x_c, y_c, MsgLength, MsgType, data, manual_pos
     #-----------------------------------------------------------------------------------------    
     #-------------------------Transfer Protocol State Machine---------------------------------
     #-----------------------------------------------------------------------------------------
@@ -398,13 +422,14 @@ def main():
     
     stRcvSuccess.set("%d", success_count)
     
-    if curr_shape == Shape.Rectangle:
-        rectIntersect(x_c+(x_range/2), y_c)
-    elif curr_shape == Shape.Circle:
-        circIntersect(x_c, y_c)
+    if not manual_pos:
+        if curr_shape == Shape.Rectangle:
+            rectIntersect(x_c+(x_range/2), y_c)
+        elif curr_shape == Shape.Circle:
+            circIntersect(x_c, y_c)
     
     root.after(1,main)
-
+    
 #-----------------------------------------------------------------------------------------    
 #-------------------------------------Initialization--------------------------------------
 #-----------------------------------------------------------------------------------------    
@@ -464,9 +489,10 @@ Label(root, text="Press Enter To Set", font = "Courier 12 bold").place(x=660, y=
 Label(root, text="Constraint Region", font = "Courier 12 bold").place(x=660, y=270)
 #-----------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------
-draw_constraint(Shape.Rectangle)
+draw_constraint(Shape.Rectangle, default_sqX, default_sqY, default_sqL, default_sqH)
 root.bind('<Escape>', close)
 root.bind('<Return>', entry_callback)
+w.bind('<Button-1>', on_click)
 root.after(1,main)
 root.mainloop()
 

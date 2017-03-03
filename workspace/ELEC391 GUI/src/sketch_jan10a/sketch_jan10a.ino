@@ -27,6 +27,8 @@ short currentdirection2 = CLOCKWISE;
 long previousPos2 = 0;
 volatile double angle2 = 90.0;
 volatile long countData = 0;
+long Pos1offset = 0;
+long Pos2offset = 0;
 /*===============================*/
 
 /*===============================*/
@@ -111,7 +113,7 @@ void setup() {
 }
 
 void loop() {
-#ifndef DEBUG //main loop 
+#if !defined(DEBUG) && !defined(LOCAL_OUTPUT) //main loop 
   static int tries = 0;
   curr_tick = millis();
   if(!pause){
@@ -171,31 +173,30 @@ void loop() {
       rxPID = true;
     }
     
-    if(intersect){
-        if (state == 0){
-          if(incomingByte == 0xFB){
-            state = 1;
-          }
-        }
-        else if(state == 1){
-          desired_angle1 = incomingByte;
-          state = 2;
-        }
-        else if(state == 2){
-          desired_angle2 = incomingByte;
-          state = 3;
-        }
-        else if(state == 3){
-          if(incomingByte == 0xFA){
-            state = 0;
-          }
-        }
+    if (state == 0){
+      if(incomingByte == 0xFB){
+        state = 1;
       }
+    }
+    else if(state == 1){
+      desired_angle1 = incomingByte;
+      state = 2;
+    }
+    else if(state == 2){
+      desired_angle2 = incomingByte;
+      state = 3;
+    }
+    else if(state == 3){
+      if(incomingByte == 0xFA){
+        state = 0;
+      }
+    }
+      
     }
     //pass values to PID library to compute output power
     PID_Output(intersect, desired_angle1, desired_angle2);
-  
-#else  //for debugging and testing PID
+#endif  
+#ifdef DEBUG //for debugging and testing PID
   /*static int iter = 0;
   ISR_Counter();
   PID_Output(true, desired_angle1, desired_angle2);
@@ -226,20 +227,41 @@ void loop() {
     iter++;   
     lastMessage = now; 
   }  */
-  int prox = digitalRead(REED1);
-  int prox2 = digitalRead(REED2);
-  if(prox == HIGH){
-    //Serial.print("Centered");
+  static bool leftdone = false;
+  static bool rightdone = false;
+  ISR_Counter();
+
+  if(!leftdone)
+    analogWrite(CWPinL, 50);
+  if(leftdone && !rightdone)
+    analogWrite(CCWPinR, 50);
+    
+  now = millis(); //Keep track of time
+  
+  if(now - lastMessage > serialPing) {
+    if(!leftdone){
+      if(previousPos2 == encoderPos2){
+        leftdone = true;
+        Pos2offset = encoderPos2 + 5;
+      } 
+      previousPos2 = encoderPos2;
+    }
+    if(leftdone){
+      if(previousPos == encoderPos){
+        rightdone = true;
+        Pos1offset = encoderPos -5;
+      } 
+      previousPos = encoderPos;      
+    }
+    
+    lastMessage = now; 
+  } 
+
+  while(1){
+    PID_Output(1, 90,90);
   }
-  else{
-    //Serial.print("Not Centered");
-  }
-  if(prox2 == HIGH){
-    Serial.println("OPEN");
-  }
-  else{
-    Serial.println("CLOSED");
-  }
+  
+  
 #endif //DEBUG
 
 #ifdef LOCAL_OUTPUT //for outputting encoder information on local arduino serial
@@ -332,8 +354,8 @@ void ISR_Counter(){
 
   digitalWrite(13, HIGH); // Set OE to HIGH (disable)
   
-  encoderPos = 100+mergeFunc(MSBresult, secondResult, thirdResult, LSBresult);
-  encoderPos2 = 100+mergeFunc(MSBresult2, secondResult2, thirdResult2, LSBresult2);
+  encoderPos = Pos1offset+mergeFunc(MSBresult, secondResult, thirdResult, LSBresult);
+  encoderPos2 = Pos2offset+mergeFunc(MSBresult2, secondResult2, thirdResult2, LSBresult2);
 
   angle = (encoderPos *0.9);
   angle2 = (encoderPos2*0.9);
