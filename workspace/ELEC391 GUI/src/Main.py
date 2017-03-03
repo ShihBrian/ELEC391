@@ -14,12 +14,13 @@ from matplotlib import style
 import time
 from scipy.optimize import fsolve
 
+
 #==============Plot Globals===============#
 wHeight = 508
 wWidth = 501
 x_range = 160
-y_start = 60
-y_end = 160
+y_start = 0
+y_end = 140
 y_range = y_end - y_start
 style.use("ggplot")
 f = Figure(figsize=(5.4,5.3), dpi=120)
@@ -29,7 +30,7 @@ a.set_xlim([-1*x_range/2,x_range/2])
 a.set_ylim([y_start,y_end])
 x_c = 0
 y_c = 0
-AL = 80
+AL = 70
 angle1 = 90
 angle2 = 90
 x_conv =(wWidth/x_range)
@@ -67,22 +68,34 @@ success_count = 0
 class Shape(Enum):
     Rectangle = 1
     Circle = 2
-sqX=-10
-sqY=130
-sqL=20
-sqH=10
+    
+sqX=-15
+sqY=85
+sqL=30
+sqH=40
 circR = 25
 circX = 125
 circY = 125
 curr_shape = Shape.Rectangle
 #==========================================#
 
+#==============PID Globals=================#
+P = 10;
+I = 0;
+D = 1;
+Wall_P = 100
+Wall_D = 10
+Spring_P = 10
+Spring_D = 1
+Damper_P = 10
+Damper_D = 1
+#==========================================#
 pause = 0
 intersect_time = time.time()
 intersect_delay = 1
 start_time = time.time()
 start_time2 = time.time()*1000
-time2_delay = 500
+time2_delay = 250
 
 class StatusBar(Frame):
 
@@ -127,17 +140,17 @@ def rectIntersect(pX, pY):
         yDown = cBLy - pY
         minimum = min(xLeft,xRight,yUp,yDown)
         if xLeft == minimum:
-            desired_x = sqX-1
+            desired_x = sqX-4
             desired_y = pY
         elif xRight == minimum:
-            desired_x = cTRx+1
+            desired_x = cTRx+4
             desired_y = pY
         elif yUp == minimum:
             desired_x = pX
-            desired_y = sqY-1
+            desired_y = sqY-4
         else:
             desired_x = pX
-            desired_y = cBLy+1
+            desired_y = cBLy+4
         if start_time2+time2_delay < time.time()*1000:
             angle1, angle2 = inverse_kinematic(desired_x-(x_range/2), desired_y)
             stDesired1.set("%d", angle1)
@@ -182,21 +195,22 @@ def Send_Intersect_Flag(flag):
                 ser.write(IntersectFalse)
                 bOnce2 = 0 
                              
-def create_entry(shape):
-    global entryLength, entryHeight, entryX, entryY, XYLabel, LengthLabel, WidthLabel    
-    if shape == Shape.Rectangle:
+def create_entry(type):
+    global entryLength, entryHeight, entryX, entryY, XYLabel, LengthLabel, WidthLabel   
+    if type == Shape.Rectangle:
         LengthLabel.config(text="Length")
         XYLabel.config(text="Bottom Left XY")
         WidthLabel.config(text="Height")
         entryHeight.configure(state='normal')
-    if shape == Shape.Circle:
+    if type == Shape.Circle:
         LengthLabel.config(text="Radius")
         XYLabel.config(text="Center XY")
         WidthLabel.config(text="")
         entryHeight.configure(state='disabled')
+        
  
 def entry_callback(event):
-    global sqX, sqY, sqH, sqL, circR, circX, circY, curr_shape
+    global sqX, sqY, sqH, sqL, circR, circX, circY, curr_shape, P, I, D
     if len(entryX.get()) != 0:
         if curr_shape == Shape.Rectangle:
             sqX = int(entryX.get())
@@ -207,13 +221,28 @@ def entry_callback(event):
             circR = int(entryLength.get())
             circX = int(entryX.get())
             circY = int(entryY.get())
-        draw_constraint(curr_shape)        
-     
+        draw_constraint(curr_shape) 
+    if len(entryP.get()) != 0:
+        Set_PID(entryP.get(),entryI.get(),entryD.get())
+
+def Set_PID(P,I,D):
+    txP = [int(P)]
+    txI = [int(I)]
+    txD = [int(D)]
+    ser.write(b"\xFC")
+    ser.write(txP)
+    ser.write(txI)
+    ser.write(txD)
+    
 def create_buttons(root):
     ttk.Button(root, text="Square", command=lambda: draw_constraint(Shape.Rectangle)).place(x=0,y=0)
     ttk.Button(root, text="Circle", command=lambda: draw_constraint(Shape.Circle)).place(x=75,y=0)
     ttk.Button(root, text="Pause", command=lambda: pause_update()).place(x=500,y=0)
     ttk.Button(root, text="Clear", command=lambda: clear()).place(x=575,y=0)
+    ttk.Button(root, text="Wall", command=lambda: Set_PID(Wall_P, 0, Wall_D)).place(x=660,y=500)
+    ttk.Button(root, text="Spring", command=lambda: Set_PID(Spring_P, 0, Spring_D)).place(x=740,y=500)
+    ttk.Button(root, text="Damper", command=lambda: Set_PID(Damper_P, 0, Damper_D)).place(x=820,y=500)
+    ttk.Button(root, text="Button").place(x=740,y=530)
 
 def create_labels(root):
     Label(root, text="Rx Count", font=("Courier", 18)).place(x=660,y=10)
@@ -257,12 +286,12 @@ def draw_point(x,y):
         line1y = wHeight-y_conv*(AL*math.sin(math.radians(angle1)))
         line2x = x_conv*((x_range*0.75)+AL*math.cos(math.radians(180-angle2)))
         line2y = wHeight-y_conv*(AL*math.sin(math.radians(180-angle2)))
-        restrict = w.create_rectangle(0,wHeight-120*y_conv+(y_conv*y_start),wWidth,wHeight, fill = "light salmon", outline = "")
+        restrict = w.create_rectangle(0,wHeight-100*y_conv+(y_conv*y_start),wWidth,wHeight, fill = "light salmon", outline = "")
         rect = w.create_rectangle(x-1,wHeight-y-1,x+3,wHeight-y+3, outline="")
-        line1 = w.create_line(x_conv*(x_range/4), wHeight+(y_conv*y_start), line1x, line1y+(y_conv*y_start), width=7 )
-        line2 = w.create_line(x_conv*(x_range*0.75), wHeight+(y_conv*y_start), line2x, line2y+(y_conv*y_start), width=7 )
-        line3 = w.create_line(line1x, line1y+(y_conv*y_start),x,wHeight-y+(y_conv*y_start), width=7 )
-        line4 = w.create_line(line2x, line2y+(y_conv*y_start),x, wHeight-y+(y_conv*y_start), width=7 )
+        line1 = w.create_line(x_conv*(x_range/4), wHeight+(y_conv*y_start), line1x, line1y+(y_conv*y_start), width=4 )
+        line2 = w.create_line(x_conv*(x_range*0.75), wHeight+(y_conv*y_start), line2x, line2y+(y_conv*y_start), width=4 )
+        line3 = w.create_line(line1x, line1y+(y_conv*y_start),x,wHeight-y+(y_conv*y_start), width=4 )
+        line4 = w.create_line(line2x, line2y+(y_conv*y_start),x, wHeight-y+(y_conv*y_start), width=4 )
         
 def pause_update():
     ser.write(PauseByte)
@@ -314,6 +343,7 @@ def MsgHandler(Msgtype, data):
         pass
     elif Msgtype == eMsgType.debug:
         print(data)
+        
 def fk_solve():
     global x_c, y_c, angle1, angle2
     a,b = fsolve(forward_kinematic,(0,0))
@@ -415,13 +445,23 @@ entryLength = Entry(root, width = 5)
 entryLength.place(x=760, y=325)
 entryHeight = Entry(root, width = 5)
 entryHeight.place(x=760, y=350)
+entryP = Entry(root,width =5)
+entryP.place(x=710, y= 450)
+entryI = Entry(root,width =5)
+entryI.place(x=760, y= 450)
+entryD = Entry(root,width =5)
+entryD.place(x=810, y= 450)
 XYLabel = Label(root)
 XYLabel.place(x=660,y=300)
 LengthLabel = Label(root)
 LengthLabel.place(x=660,y=325)
 WidthLabel = Label(root)
 WidthLabel.place(x=660,y=350)
-Label(root, text="Press Enter To Set", font = "Courier 16 bold").place(x=660, y=380)
+PIDLabel = Label(root)
+PIDLabel.place(x=720,y=470)
+PIDLabel.config(text="P    I    D", font = "Courier 12 bold")
+Label(root, text="Press Enter To Set", font = "Courier 12 bold").place(x=660, y=380)
+Label(root, text="Constraint Region", font = "Courier 12 bold").place(x=660, y=270)
 #-----------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------
 draw_constraint(Shape.Rectangle)
