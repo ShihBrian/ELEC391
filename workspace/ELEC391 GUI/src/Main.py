@@ -53,6 +53,7 @@ class eMsgType(Enum):
     desiredLeft = 3
     desiredRight = 4
     debug = 5
+    start =6;
     
 PauseByte = b"\xFE"
 IntersectTrue = b"\xFF"
@@ -64,6 +65,7 @@ MsgLength = 0
 Startbyte = 255
 EndByte = 254
 success_count = 0
+startrx= 0;
 #==========================================#
 
 #===========Constraint Globals=============#
@@ -93,7 +95,7 @@ D = 1;
 Wall_P = 100
 Wall_D = 10
 Spring_P = 10
-Spring_D = 1
+Spring_D = 0
 Damper_P = 10
 Damper_D = 1
 #==========================================#
@@ -160,7 +162,7 @@ def rectIntersect(pX, pY):
             desired_x = pX
             desired_y = cBLy+4
         if start_time2+time2_delay < time.time()*1000:
-            angle1, angle2 = inverse_kinematic(desired_x-(x_range/2), desired_y)
+            angle1, angle2 = inverse_kinematic(desired_x, desired_y)
             stDesired1.set("%d", angle1)
             stDesired2.set("%d", angle2)            
             ser.write(b"\xFB")
@@ -249,8 +251,7 @@ def create_buttons(root):
     ttk.Button(root, text="Clear", command=lambda: clear()).place(x=575,y=0)
     ttk.Button(root, text="Wall", command=lambda: Set_PID(Wall_P, 0, Wall_D)).place(x=660,y=500)
     ttk.Button(root, text="Spring", command=lambda: Set_PID(Spring_P, 0, Spring_D)).place(x=740,y=500)
-    ttk.Button(root, text="Damper", command=lambda: Set_PID(Damper_P, 0, Damper_D)).place(x=820,y=500)
-    ttk.Button(root, text="Button").place(x=740,y=530)
+    ttk.Button(root, text="Button", command=lambda: Set_PID(Damper_P, 0, Damper_D)).place(x=820,y=500)
 
 def create_labels(root):
     Label(root, text="Rx Count", font=("Courier", 18)).place(x=660,y=10)
@@ -315,11 +316,15 @@ def close(event):
     sys.exit()
 
 def on_click(event):
-    global mouse_x, mouse_y, manual_pos
+    global mouse_x, mouse_y, manual_pos, sqX, sqY, sqL, sqH
     mouse_x = event.x
     mouse_y = event.y
+    print(mouse_x/x_conv - (x_range/2),y_end-mouse_y/y_conv)
     manual_pos = 1
-    clear()
+    sqX = sqY = sqL = sqH = 0
+    Set_PID(10,0,1)
+    angle1, angle2 = inverse_kinematic(mouse_x/x_conv - (x_range/2), y_end-mouse_y/y_conv)
+    print(angle1, angle2)
     ser.write(b"\xFB")
     value = [int(angle1)]
     angle = bytes(value)
@@ -328,6 +333,7 @@ def on_click(event):
     angle = bytes(value)
     ser.write(angle)
     ser.write(b"\xFA")
+    Send_Intersect_Flag(TRUE)
     
 def forward_kinematic(p):
     global angle1, angle2
@@ -359,15 +365,17 @@ def fk_solve():
     draw_point(x_conv*(x_c+(x_range/2)), y_conv*y_c)
  
 def MsgHandler(Msgtype, data):
-    global angle1, angle2
+    global angle1, angle2, startrx
     if Msgtype == eMsgType.encoderPosLeft:
-        angle1 = data*0.9
-        stAngle1.set("%.1lf", angle1)
-        fk_solve()
+        if startrx == 1:
+            angle1 = data*0.9
+            stAngle1.set("%.1lf", angle1)
+            fk_solve()
     elif Msgtype == eMsgType.encoderPosRight:
-        angle2 = data*0.9
-        stAngle2.set("%.1lf", angle2)
-        fk_solve()  
+        if startrx == 1:       
+            angle2 = data*0.9
+            stAngle2.set("%.1lf", angle2)
+            fk_solve()  
     elif Msgtype == eMsgType.desiredLeft:
         #stDesired1.set("%d", data)
         pass
@@ -376,9 +384,11 @@ def MsgHandler(Msgtype, data):
         pass
     elif Msgtype == eMsgType.debug:
         print(data)
+    elif Msgtype == eMsgType.start:
+        startrx = 1;
         
 def main():
-    global state, success_count, x_c, y_c, MsgLength, MsgType, data, manual_pos
+    global state, success_count, x_c, y_c, MsgLength, MsgType, data, manual_pos, mouse_x, mouse_y
     #-----------------------------------------------------------------------------------------    
     #-------------------------Transfer Protocol State Machine---------------------------------
     #-----------------------------------------------------------------------------------------
@@ -399,6 +409,8 @@ def main():
                 MsgType = eMsgType.desiredRight
             elif x == 5:
                 MsgType = eMsgType.debug
+            elif x == 6:
+                MsgType = eMsgType.start
             state = States.RxMsgLength
         elif state == States.RxMsgLength: #receive message length, 1 byte
             x = int(ser.read(1),16)
@@ -424,10 +436,13 @@ def main():
     
     if not manual_pos:
         if curr_shape == Shape.Rectangle:
-            rectIntersect(x_c+(x_range/2), y_c)
+            rectIntersect(x_c, y_c)
         elif curr_shape == Shape.Circle:
             circIntersect(x_c, y_c)
-    
+    if manual_pos == 1:
+        print(abs(x_c-(mouse_x/x_conv - (x_range/2))),abs(y_c-(y_end-mouse_y/y_conv)))
+        if(abs(x_c-(mouse_x/x_conv - (x_range/2))) <2 and abs(y_c-(y_end-mouse_y/y_conv))<2):
+            Send_Intersect_Flag(FALSE)
     root.after(1,main)
     
 #-----------------------------------------------------------------------------------------    

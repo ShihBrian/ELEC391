@@ -44,14 +44,15 @@ enum MsgType{
   desiredleft = 3,
   desiredright = 4,
   debug = 5,
+  start = 6,
 };
 /*===============================*/
 
 /*===============================*/
 //PID globals
-float Kp = 100;
+float Kp = 50;
 float Ki = 0;
-float Kd = 10;
+float Kd = 5;
 double Desired1,PIDOutput1;
 double Desired2,PIDOutput2;
 double Actual1 = 90.0;
@@ -59,7 +60,7 @@ double Actual2 = 90.0;
 PID PID1(&Actual1, &PIDOutput1, &Desired1, Kp, Ki, Kd, DIRECT);
 PID PID2(&Actual2, &PIDOutput2, &Desired2, Kp, Ki, Kd, DIRECT);
 const int sampleRate = 10; // Variable that determines how fast our PID loop runs
-const long serialPing = 1000;
+const long serialPing = 100;
 unsigned long now = 0;
 unsigned long lastMessage = 0;
 int rxPID = false;
@@ -83,10 +84,10 @@ void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
   Serial.setTimeout(10);
-  pinMode(CCWPinL, OUTPUT);
   pinMode(CWPinL, OUTPUT);
-  pinMode(CCWPinR, OUTPUT);
+  pinMode(CCWPinL, OUTPUT);
   pinMode(CWPinR, OUTPUT);
+  pinMode(CCWPinR, OUTPUT);
   pinMode(9, OUTPUT);
   pinMode(REED1, INPUT_PULLUP);
   pinMode(REED2, INPUT_PULLUP);
@@ -110,6 +111,10 @@ void setup() {
   while(!Serial){ //wait for serial to be initialized
   }
   delay(100);
+  while(!home_position());
+  all_off();
+  Send_Message(start,1);
+  delay(500);
 }
 
 void loop() {
@@ -190,8 +195,8 @@ void loop() {
       if(incomingByte == 0xFA){
         state = 0;
       }
-    }
-      
+    } 
+    
     }
     //pass values to PID library to compute output power
     PID_Output(intersect, desired_angle1, desired_angle2);
@@ -227,52 +232,105 @@ void loop() {
     iter++;   
     lastMessage = now; 
   }  */
+  
+#endif //DEBUG
+
+#ifdef LOCAL_OUTPUT //for outputting encoder information on local arduino serial
+ISR_Counter();
+  if((encoderPos != previousPos) || (encoderPos2 != previousPos2)){
+    Serial.print(encoderPos);
+    Serial.print("\t");
+    Serial.println(encoderPos2);
+    previousPos = encoderPos;
+    previousPos2 = encoderPos2;
+  }
+#endif //LOCAL_OUTPUT
+}
+
+int home_position(){
   static bool leftdone = false;
   static bool rightdone = false;
+  static long prev_pos = 200;
+  static long prev_pos2 = 200;
+  static int done = 0;
+  static bool leftdone2 = false;
+  static bool rightdone2 = false;
+  static int count = 0;
   ISR_Counter();
-
-  if(!leftdone)
-    analogWrite(CWPinL, 50);
-  if(leftdone && !rightdone)
-    analogWrite(CCWPinR, 50);
-    
-  now = millis(); //Keep track of time
   
+  if(leftdone == false){
+    analogWrite(CWPinL,65);
+  }
+  if(leftdone && !rightdone){
+    analogWrite(CCWPinR,65);
+  }
+  
+  now = millis(); //Keep track of time
   if(now - lastMessage > serialPing) {
-    if(!leftdone){
-      if(previousPos2 == encoderPos2){
+    if(leftdone == false){
+      if(prev_pos == encoderPos){
         leftdone = true;
-        Pos2offset = encoderPos2 + 5;
+        analogWrite(CWPinL,0);
+        Pos1offset = encoderPos - 13;
+        delay(100);
+        analogWrite(CCWPinL, 45);
+        delay(300);
+        digitalWrite(CCWPinL, LOW);
       } 
-      previousPos2 = encoderPos2;
+      prev_pos = encoderPos;
     }
-    if(leftdone){
-      if(previousPos == encoderPos){
+    else if(leftdone && !rightdone){
+      if(prev_pos2 == encoderPos2){
         rightdone = true;
-        Pos1offset = encoderPos -5;
+        analogWrite(CCWPinR,0);
+        Pos2offset = encoderPos2 - 15;
+        delay(100);
+        analogWrite(CWPinR, 40);
+        delay(300);
+        digitalWrite(CWPinR, LOW);
+        delay(200);
       } 
-      previousPos = encoderPos;      
+      prev_pos2 = encoderPos2;      
     }
     
     lastMessage = now; 
   } 
 
-  while(1){
-    PID_Output(1, 90,90);
+  
+  if(leftdone && rightdone){ 
+    if(encoderPos2+1 < 100){
+      analogWrite(CWPinR, 50);
+      analogWrite(CCWPinR, 0); 
+    }
+    else if(encoderPos2-1 > 100){
+      analogWrite(CWPinR, 0);
+      analogWrite(CCWPinR, 50); 
+    }
+    else{
+      analogWrite(CCWPinR, 0);
+      analogWrite(CWPinR, 0); 
+      rightdone2 = true;
+    }
+    if(encoderPos-1 > 100){
+      analogWrite(CWPinL, 45);
+      analogWrite(CCWPinL, 0); 
+    }
+    else if(encoderPos+1 < 100){
+      analogWrite(CCWPinL, 0);
+      analogWrite(CCWPinL, 45); 
+    }
+    else{
+      analogWrite(CCWPinL, 0);
+      analogWrite(CWPinL, 0); 
+      leftdone2 = true;
+    }
+  }  
+  if(leftdone2 && rightdone2){
+    count++;
   }
-  
-  
-#endif //DEBUG
 
-#ifdef LOCAL_OUTPUT //for outputting encoder information on local arduino serial
-  if((encoderPos != previousPos) || (encoderPos2 != previousPos2)){
-    Serial.print(angle);
-    Serial.print("\t");
-    Serial.println(angle2);
-    previousPos = encoderPos;
-    previousPos2 = encoderPos2;
-  }
-#endif //LOCAL_OUTPUT
+  if(count== 3000) return 1;
+  else return 0;
 }
 
 void PID_Output(bool flag, int desired_angle1, int desired_angle2){
@@ -354,10 +412,10 @@ void ISR_Counter(){
 
   digitalWrite(13, HIGH); // Set OE to HIGH (disable)
   
-  encoderPos = Pos1offset+mergeFunc(MSBresult, secondResult, thirdResult, LSBresult);
-  encoderPos2 = Pos2offset+mergeFunc(MSBresult2, secondResult2, thirdResult2, LSBresult2);
+  encoderPos = -1*Pos1offset+mergeFunc(MSBresult, secondResult, thirdResult, LSBresult);
+  encoderPos2 = -1*Pos2offset+mergeFunc(MSBresult2, secondResult2, thirdResult2, LSBresult2);
 
-  angle = (encoderPos *0.9);
+  angle = (encoderPos*0.9);
   angle2 = (encoderPos2*0.9);
 }
 
