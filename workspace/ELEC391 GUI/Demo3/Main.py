@@ -18,9 +18,9 @@ from scipy.optimize import fsolve
 #==============Plot Globals===============#
 wHeight = 508
 wWidth = 501
-x_range = 160
+x_range = 250
 y_start = 0
-y_end = 140
+y_end = 200
 y_range = y_end - y_start
 style.use("ggplot")
 f = Figure(figsize=(5.4,5.3), dpi=120)
@@ -30,9 +30,10 @@ a.set_xlim([-1*x_range/2,x_range/2])
 a.set_ylim([y_start,y_end])
 x_c = 0
 y_c = 0
-left_length = 10
-right_length = 10
-base_length = 10   
+left_length = 40
+right_length = 40
+base_length = 100   
+coil_length = 80
 x_conv =(wWidth/x_range)
 y_conv = (wWidth/y_range)
 mouse_x = 0
@@ -284,15 +285,28 @@ def init_serial():
     return ser
 
 def draw_point(x,y):
-    global rect, pause, right_length, line1,line2,line3,line4, x_conv, y_conv, restrict
+    global rect, pause, right_length, line1,line2,line3,line4, x_conv, y_conv
     if pause == 0:
         w.delete(rect)
         w.delete(line1)
         w.delete(line2)
-        w.delete(restrict)
+        w.delete(line3)
+        w.delete(line4)
+        angleleft = math.atan(y/(base_length/2+x))
+        left_x = coil_length*math.cos(angleleft)
+        left_y = coil_length*math.sin(angleleft)
+        angleright = math.atan(y/(base_length/2-x))
+        right_x = coil_length*math.cos(angleright)
+        right_y = coil_length*math.sin(angleright)
         rect = w.create_rectangle(x-1,wHeight-y-1,x+3,wHeight-y+3, outline="")
-        line1 = w.create_line(x_conv*(x_range/4), wHeight+(y_conv*y_start), x_conv*(x+x_range/2),(y_end-y)*y_conv, width=4 )
-        line2 = w.create_line(x_conv*(x_range*0.75), wHeight+(y_conv*y_start), x_conv*(x+x_range/2), (y_end-y)*y_conv, width=4 )
+        left_base_pos = (x_range/2)-(base_length/2)
+        right_base_pos = (x_range/2)+(base_length/2)
+        line1 = w.create_line(x_conv*left_base_pos, wHeight+(y_conv*y_start), x_conv*(x+x_range/2),(y_end-y)*y_conv, width=4 )
+        line2 = w.create_line(x_conv*right_base_pos, wHeight+(y_conv*y_start), x_conv*(x+x_range/2), (y_end-y)*y_conv, width=4 )
+        line3 = w.create_line(x_conv*left_base_pos, wHeight+10+(y_conv*y_start), x_conv*(left_base_pos+left_x),(y_end-left_y)*y_conv, width=15 )
+        line4 = w.create_line(x_conv*right_base_pos, wHeight+10+(y_conv*y_start), x_conv*(right_base_pos-right_x),(y_end-right_y)*y_conv, width=15 )
+        
+        
         
 def pause_update():
     ser.write(PauseByte)
@@ -349,10 +363,7 @@ def MsgHandler(Msgtype, data):
     if Msgtype == eMsgType.encoderPosLeft:
         if startrx == 1:
             left_length = data
-
-            stleft_length.set("%.1lf", left_length)
-            stright_length.set("%.1lf", right_length)
-            
+            stleft_length.set("%.1lf", left_length)  
     elif Msgtype == eMsgType.encoderPosRight:
         if startrx == 1:       
             right_length = data
@@ -371,9 +382,10 @@ def MsgHandler(Msgtype, data):
         print(data)
     elif Msgtype == eMsgType.start:
         startrx = 1;
-        
+
+ 
 def main():
-    global state, success_count, x_c, y_c, MsgLength, MsgType, data, manual_pos, mouse_x, mouse_y
+    global state, success_count, x_c, y_c, MsgLength, MsgType, data, manual_pos, mouse_x, mouse_y, y_coordinate, x_coordinate
     #-----------------------------------------------------------------------------------------    
     #-------------------------Transfer Protocol State Machine---------------------------------
     #-----------------------------------------------------------------------------------------
@@ -413,7 +425,7 @@ def main():
                 success_count = success_count + 1
                 MsgHandler(MsgType, data)
             #else discard bytes and change state back to waiting for startbyte
-            state = States.RxStart                         
+            state = States.RxStart                          
     #-----------------------------------------------------------------------------------------
     #-----------------------------------------------------------------------------------------
     
@@ -459,7 +471,6 @@ line1 = w.create_line(0,0,0,0)
 line2 = w.create_line(0,0,0,0)
 line3 = w.create_line(0,0,0,0)
 line4 = w.create_line(0,0,0,0)
-restrict = w.create_rectangle(0,0,0,0)
 rectangle = w.create_rectangle(0,0,0,0)
 #-----------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------
