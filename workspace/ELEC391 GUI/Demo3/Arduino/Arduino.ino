@@ -1,10 +1,12 @@
 #include <PID_v1.h>
 #include <SoftwareSerial.h>
 
-#define FWPinL 4
-#define BWPinL 5
-#define FWPinR 6
-#define BWPinR 7
+#define FWPinR 4
+#define BWPinR 5
+#define FWPinL 6
+#define BWPinL 7
+
+//BWL   FWL   BWR   FWR
 
 //#define DEBUG
 //#define LOCAL_OUTPUT
@@ -13,16 +15,16 @@ SoftwareSerial mySerial(10,11);
 //Globals for optical encoder
 #define FORWARD 1
 #define BACKWARD 2
-volatile long encoderPosLeft = 10;
-volatile long encoderPosRight = 10;
+volatile long encoderPosLeft = 0;
+volatile long encoderPosRight = 0;
 short currDirectionLeft = FORWARD;
 short currDirectionRight = FORWARD;
 long previousPosLeft = 0;
 long previousPosRight = 0;
 volatile double extensionLeft = 0;
 volatile double extensionRight= 0;
-long PosLeftoffset = -10;
-long PosRightoffset = -10;
+long PosLeftoffset = 0;
+long PosRightoffset = 0;
 volatile long countData = 0;
 /*===============================*/
 
@@ -45,17 +47,19 @@ enum MsgType{
 
 /*===============================*/
 //PID globals
-float Kp = 50;
+float Kp = 30;
 float Ki = 0;
-float Kd = 5;
+float Kd = 3;
 double DesiredLeft,PIDOutputLeft;
 double DesiredRight,PIDOutputRight;
 double ActualLeft = 0;
 double ActualRight = 0;
+int directionleft;
+int directionright;
 PID PID1(&ActualLeft, &PIDOutputLeft, &DesiredLeft, Kp, Ki, Kd, DIRECT);
 PID PID2(&ActualRight, &PIDOutputRight, &DesiredRight, Kp, Ki, Kd, DIRECT);
 const int sampleRate = 10; // Variable that determines how fast our PID loop runs
-const long serialPing = 100;
+const long serialPing = 300;
 unsigned long now = 0;
 unsigned long lastMessage = 0;
 int rxPID = false;
@@ -71,11 +75,6 @@ unsigned long start_time = millis();
 bool pause = false;
 bool intersect = false;
 
-int desired_angle1 = 0;
-int desired_angle2 = 0;
-int direction1;
-int direction2;
-
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
@@ -84,20 +83,24 @@ void setup() {
   pinMode(BWPinL, OUTPUT);
   pinMode(FWPinR, OUTPUT);
   pinMode(BWPinR, OUTPUT);
-  pinMode(9, OUTPUT);
-  digitalWrite(9, LOW); // /RST resets the internal counter between runs
-  delay(10);
-  digitalWrite(9, HIGH); // Stay high for rest of the run
   // Set all pins in PORTA and C (digital pins 22->37) as input pins
   for(int i = 22; i<38; i++) {
     pinMode(i, INPUT);
   }
   // Set pins 5,6,7 in PORT B (digital pins 11->16) as output pins
-  for(int j = 11; j<17; j++) {
+  for(int j = 8; j<17; j++) {
     pinMode(j, OUTPUT);
     digitalWrite(j, LOW);
-    
   }
+  analogWrite(BWPinL, 125);
+  analogWrite(BWPinR, 125);
+  delay(1000);
+  analogWrite(BWPinL, 255);
+  analogWrite(BWPinR, 255);
+  pinMode(13, OUTPUT);
+  digitalWrite(13, LOW); // /RST resets the internal counter between runs
+  delay(10);
+  digitalWrite(13, HIGH); // Stay high for rest of the run
   PID1.SetMode(AUTOMATIC);
   PID2.SetMode(AUTOMATIC);
   PID1.SetSampleTime(sampleRate);
@@ -106,8 +109,11 @@ void setup() {
   }
   Send_Message(start,1);
   delay(500);
+  all_off();
+  delay(500);
 }
-
+int Kp1 = 0;
+int Kp2= 0;
 void loop() {
 #if !defined(DEBUG) && !defined(LOCAL_OUTPUT) //main loop 
   static int tries = 0;
@@ -118,9 +124,9 @@ void loop() {
       if((previousPosLeft != encoderPosLeft)||(previousPosRight != encoderPosRight)){
         if(tries == 2){ //send message every second encoderPosLeft change
           Send_Message(encoderleft, encoderPosLeft); 
+          Send_Message(encoderright, encoderPosRight);
           previousPosLeft = encoderPosLeft;
-          //Send_Message(encoderright, encoderPosRight); 
-          //previousPosRight = encoderPosRight; 
+          previousPosRight = encoderPosRight;
           tries = 0;
         }
         else{
@@ -148,9 +154,6 @@ void loop() {
         rxPID = false;
         PID1.SetTunings(P,I,D);
         PID2.SetTunings(P,I,D);
-        Send_Message(debug, P);
-        Send_Message(debug, I);
-        Send_Message(debug, D);
       } 
     }
     
@@ -168,6 +171,10 @@ void loop() {
     else if(incomingByte == 0xFC){
       rxPID = true;
     }
+
+    if(incomingByte == 0xEF){
+      goto_middle();
+    }
     
     if (state == 0){
       if(incomingByte == 0xFB){
@@ -175,92 +182,126 @@ void loop() {
       }
     }
     else if(state == 1){
-      desired_angle1 = incomingByte;
+      DesiredLeft = incomingByte;
       state = 2;
+      PID_Output(0, DesiredLeft, DesiredRight); 
     }
     else if(state == 2){
-      desired_angle2 = incomingByte;
+      DesiredRight = incomingByte;
       state = 3;
+      PID_Output(0, DesiredLeft, DesiredRight); 
     }
     else if(state == 3){
       if(incomingByte == 0xFA){
         state = 0;
+        PID_Output(0, DesiredLeft, DesiredRight); 
       }
     } 
-    
-    }
-    //pass values to PID library to compute output power
-    PID_Output(intersect, desired_angle1, desired_angle2);
+  }
+  //pass values to PID library to compute output power
+  PID_Output(intersect, DesiredLeft, DesiredRight);   
 #endif  
+
 #ifdef DEBUG //for debugging and testing PID
-  /*static int iter = 0;
   ISR_Counter();
-  PID_Output(true, desired_angle1, desired_angle2);
+  static double timenow = 0;
+  static bool bonce = true;
+  if (Serial.available() > 0) { //If we sent the program a command deal with it
+      bonce = true;
+      Kp1 = Serial.parseFloat();
+      analogWrite(FWPinL, 100);
+      Serial.print(Kp1-10);
+      Serial.print("\t");
+      timenow = millis();
+  }
   
-  now = millis(); //Keep track of time
-  if(now - lastMessage > serialPing) { //Move arm to new position every serialPing ms
-    if (iter== 2){
-      desired_angle1 = 160;
-      desired_angle2 = 68;
-      all_off();
+  if(encoderPosLeft == Kp1){
+    if(bonce){
+      analogWrite(FWPinL, 0);
+      Serial.println(millis()-timenow);
+      bonce = false;
     }
-    else if(iter ==4){
-      desired_angle1 = 68;
-      desired_angle2 = 160;     
-      all_off();
-    }
-    else if(iter==6){
-      desired_angle1 = 90;
-      desired_angle2 = 90;     
-      all_off();
-    }
-    else if(iter ==8){
-      desired_angle1 = 121;
-      desired_angle2 = 121;     
-      all_off();
-      iter = 0;
-    }
-    iter++;   
-    lastMessage = now; 
-  }  */
-  
+  }
+
 #endif //DEBUG
 
 #ifdef LOCAL_OUTPUT //for outputting encoder information on local arduino serial
-ISR_Counter();
+  Local_Out();
+#endif //LOCAL_OUTPUT
+
+}
+
+void goto_middle(){
+  while(abs(encoderPosLeft-100)>2 || abs(encoderPosRight-100)>2){
+    ISR_Counter();
+    PID_Output(1, 100,100); 
+  }
+  all_off();
+  Send_Message(start,1);
+}
+
+void Local_Out(){
+  ISR_Counter();
   if((encoderPosLeft != previousPosLeft) || (encoderPosRight != previousPosRight)){
     Serial.print(encoderPosLeft);
     Serial.print("\t");
     Serial.println(encoderPosRight);
     previousPosLeft = encoderPosLeft;
     previousPosRight = encoderPosRight;
-  }
-#endif //LOCAL_OUTPUT
+  }  
 }
-
-int home_position(){
-}
-
-void PID_Output(bool flag, int desired_angle1, int desired_angle2){
-    if (flag){
-      //Run PID computation
-      PID1.Compute();
-      PID2.Compute();
+void PID_Output(bool flag, int DesiredL, int DesiredR){
+    int difference = 0;
+    if(encoderPosLeft > DesiredL){
+      difference = abs(encoderPosLeft - DesiredL);
+      ActualLeft = DesiredL - difference;
+      DesiredLeft = DesiredL;
+      directionleft = BACKWARD;
+    }
+    else{
+      ActualLeft = encoderPosLeft - difference;
+      DesiredLeft = DesiredL; 
+      directionleft = FORWARD;
+    }
+    if(encoderPosRight > DesiredR){
+      difference = abs(encoderPosRight - DesiredR);
+      ActualRight = DesiredR - difference;
+      DesiredRight = DesiredR;
+      directionright = BACKWARD;
+    }
+    else{
+      ActualRight = encoderPosRight - difference;
+      DesiredRight = DesiredR; 
+      directionright = FORWARD;
+    }
+    PID1.Compute();
+    PID2.Compute();    
+    static int lastpwmleft= 0;
+    static int lastpwmleft2= 0;
+    static int lastpwmright = 0;
+    static int lastpwmright2= 0;
+    //Run PID computation
+    if(flag){
       //Turn on pin according to direction and PID output. Limit to 255 
-      if (direction1 == FORWARD){
-        analogWrite(FWPinL, PIDOutputLeft>255? 255 : PIDOutputLeft);
+      if (directionleft == FORWARD){
+        //Serial.print("Forward");
+        //Serial.println(PIDOutputLeft);
+        analogWrite(FWPinL, PIDOutputLeft);
         digitalWrite(BWPinL, LOW);
       }
       else{
-        analogWrite(BWPinL, PIDOutputLeft>255? 255 : PIDOutputLeft);
+       // Serial.print("Backward");
+        //Serial.println(PIDOutputLeft);
+        analogWrite(BWPinL,PIDOutputLeft);
         digitalWrite(FWPinL, LOW);
       }
-      if (direction2 == FORWARD){
-        analogWrite(FWPinR, PIDOutputRight>255? 255 : PIDOutputRight);
+      
+      if (directionright == FORWARD){
+        analogWrite(FWPinR, PIDOutputRight);
         digitalWrite(BWPinR, LOW);
       }
       else{
-        analogWrite(BWPinR, PIDOutputRight>255? 255 : PIDOutputRight);
+        analogWrite(BWPinR,PIDOutputRight);
         digitalWrite(FWPinR, LOW);
       }
     }
@@ -268,37 +309,41 @@ void PID_Output(bool flag, int desired_angle1, int desired_angle2){
 
 //function to read 32bit data from encoder chip
 void ISR_Counter(){
-  digitalWrite(13, HIGH); // Set OE to HIGH (disable)
+  digitalWrite(9, HIGH); // Set OE to HIGH (disable)
   
-  digitalWrite(11, LOW);
-  digitalWrite(12, HIGH); // SEL1 = 0 and SEL2 = 1
+  digitalWrite(12, LOW);
+  digitalWrite(8, HIGH); // SEL1 = 0 and SEL2 = 1
   
-  digitalWrite(13, LOW); // Set OE to LOW (enable)
-  byte MSBresult = getbyte();
-  byte MSBresult2 = getbyte2();
+  digitalWrite(9  , LOW); // Set OE to LOW (enable)
+  byte MSBresult = getbyte2();
+  byte MSBresult2 = getbyte();
   
-  digitalWrite(11, HIGH);
-  digitalWrite(12, HIGH); // SEL1 = 1 and SEL2 = 1
-  byte secondResult = getbyte();
-  byte secondResult2 = getbyte2();
-  
-  digitalWrite(11, LOW);
-  digitalWrite(12, LOW); // SEL1 = 0 and SEL2 = 0
-  byte thirdResult = getbyte();
-  byte thirdResult2 = getbyte2();
-  
-  digitalWrite(11, HIGH);
-  digitalWrite(12, LOW); // SEL1 = 1 and SEL2 = 0
-  byte LSBresult = getbyte();
-  byte LSBresult2 = getbyte2();
+  digitalWrite(12, HIGH);
+  digitalWrite(8, HIGH); // SEL1 = 1 and SEL2 = 1
+  byte secondResult = getbyte2();
+  byte secondResult2 = getbyte();
 
-  digitalWrite(13, HIGH); // Set OE to HIGH (disable)
-  
-  encoderPosLeft = -1*PosLeftoffset+mergeFunc(MSBresult, secondResult, thirdResult, LSBresult);
-  encoderPosRight = -1*PosRightoffset+mergeFunc(MSBresult2, secondResult2, thirdResult2, LSBresult2);
 
-  if (encoderPosLeft < 0) encoderPosLeft = 0;
-  if (encoderPosRight < 0) encoderPosRight = 0;
+  digitalWrite(12, LOW);
+  digitalWrite(8, LOW); // SEL1 = 0 and SEL2 = 0
+  byte thirdResult = getbyte2();
+  byte thirdResult2 = getbyte();
+  
+  digitalWrite(12, HIGH);
+  digitalWrite(8, LOW); // SEL1 = 1 and SEL2 = 0
+  byte LSBresult = getbyte2();
+  byte LSBresult2 = getbyte();
+
+  digitalWrite(9, HIGH); // Set OE to HIGH (disable)
+  
+  encoderPosLeft = mergeFunc(MSBresult, secondResult, thirdResult, LSBresult)+10;
+  encoderPosRight = mergeFunc(MSBresult2, secondResult2, thirdResult2, LSBresult2)+10;
+
+  encoderPosLeft = -encoderPosLeft+20;
+  encoderPosRight = -encoderPosRight+20;
+
+  if (encoderPosLeft<0) encoderPosLeft = 0;
+  if (encoderPosRight<0) encoderPosRight = 0; 
 }
 
 //get length of data being sent out
