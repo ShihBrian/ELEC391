@@ -47,9 +47,9 @@ enum MsgType{
 
 /*===============================*/
 //PID globals
-float Kp = 30;
+float Kp = 45;
 float Ki = 0;
-float Kd = 3;
+float Kd = 0;
 double DesiredLeft,PIDOutputLeft;
 double DesiredRight,PIDOutputRight;
 double ActualLeft = 0;
@@ -92,8 +92,8 @@ void setup() {
     pinMode(j, OUTPUT);
     digitalWrite(j, LOW);
   }
-  analogWrite(BWPinL, 125);
-  analogWrite(BWPinR, 125);
+  analogWrite(BWPinL, 200);
+  analogWrite(BWPinR, 200);
   delay(1000);
   analogWrite(BWPinL, 255);
   analogWrite(BWPinR, 255);
@@ -232,9 +232,14 @@ void loop() {
 }
 
 void goto_middle(){
-  while(abs(encoderPosLeft-100)>2 || abs(encoderPosRight-100)>2){
+  while(abs(encoderPosLeft-80)>1 || abs(encoderPosRight-80)>1){
     ISR_Counter();
-    PID_Output(1, 100,100); 
+    PID_Output(1, 80,80); 
+  }
+  int i =0;
+  for(i;i<2000;i++){
+    ISR_Counter();
+    PID_Output(1, 80,80);  
   }
   all_off();
   Send_Message(start,1);

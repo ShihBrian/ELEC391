@@ -17,7 +17,7 @@ from collections import deque
 import argparse
 import imutils
 import cv2
-
+from PIL import ImageTk, Image
 #==============Plot Globals===============#
 wHeight = 508
 wWidth = 501
@@ -77,14 +77,14 @@ class Shape(Enum):
     Rectangle = 1
     Circle = 2
     
-sqX=0
-sqY=100
-sqL=20
-sqH=20
-default_sqX=0
-default_sqY=100
-default_sqL=20
-default_sqH=20
+sqX=-20
+sqY=90
+sqL=40
+sqH=40
+default_sqX=-20
+default_sqY=90
+default_sqL=40
+default_sqH=40
 circR = 20
 circX = 0
 circY = 100
@@ -96,12 +96,12 @@ manual_pos = 0;
 P = 10;
 I = 0;
 D = 1;
-Wall_P = 100
-Wall_D = 10
-Spring_P = 10
+Wall_P = 45
+Wall_D = 0
+Spring_P = 20
 Spring_D = 0
-Damper_P = 10
-Damper_D = 1
+Damper_P = 0
+Damper_D = 100
 #==========================================#
 pause = 0
 intersect_delay = 1
@@ -119,6 +119,10 @@ time_delay_manual = 100
 Camera_Toggle = 0
 
 first_start = 0;
+
+default_P = 45
+default_I = 0
+default_D = 0
 
 class StatusBar(Frame):
     def __init__(self, master):
@@ -145,7 +149,7 @@ def draw_constraint(shape, sqX1, sqY1, sqL1, sqH1):
     sqL = sqL1
     curr_shape = shape
     if shape == Shape.Rectangle:
-        rectangle = w.create_rectangle(sqX+(x_range/2)*x_conv,wHeight-sqY*y_conv+(y_conv*y_start),(sqX+(x_range/2)+sqL)*x_conv,\
+        rectangle = w.create_rectangle(abs(sqX+(x_range/2))*x_conv,wHeight-sqY*y_conv+(y_conv*y_start),abs((sqX+(x_range/2)+sqL))*x_conv,\
                             wHeight-(sqY+sqH)*y_conv+(y_conv*y_start), fill="lightblue")
         create_entry(Shape.Rectangle)
     if shape == Shape.Circle:
@@ -154,7 +158,7 @@ def draw_constraint(shape, sqX1, sqY1, sqL1, sqH1):
         create_entry(Shape.Circle)
         
 def rectIntersect(pX, pY):
-    global sqX, sqY, sqH, sqL,start_time2,start_time3, bOnce3
+    global sqX, sqY, sqH, sqL,start_time2,start_time3, bOnce3, damper_once
     cTRx = sqX+sqL
     cBLy = sqY+sqH 
     if (pX >= sqX and pX <= cTRx) and (pY >= sqY and pY <= cBLy):
@@ -166,30 +170,62 @@ def rectIntersect(pX, pY):
         yDown = cBLy - pY
         minimum = min(xLeft,xRight,yUp,yDown)
         if xLeft == minimum:
-            desired_x = sqX-3
+            desired_x = sqX-2
             desired_y = pY
         elif xRight == minimum:
-            desired_x = cTRx+3
+            desired_x = cTRx+2
             desired_y = pY
         elif yUp == minimum:
             desired_x = pX
-            desired_y = sqY-1
+            desired_y = sqY-2
         else:
             desired_x = pX
-            desired_y = cBLy+1
+            desired_y = cBLy+2
         send_desired(desired_x, desired_y)
     else:
         if bOnce3:
             start_time3 = time.time()*1000
             bOnce3 = 0
         elif start_time3+time3_delay < time.time()*1000:
-            Send_Intersect_Flag(FALSE)
-            stDesired1.set("%s", "")
-            stDesired2.set("%s", "")
+            if (damper_once == 1):
+                Send_Intersect_Flag(FALSE)
+                stDesired1.set("%s", "")
+                stDesired2.set("%s", "")
             start_time3 = time.time()*1000
 
+damper_once = 1
+last_x = -45
+last_y = 120
+def work_area(pX, pY):
+    global last_x, last_y, damper_once
+    if(pX > 36 or pX < -36):
+        if(damper_once):
+            Set_PID(0,0,30)
+            Send_Intersect_Flag(TRUE)
+            damper_once = 0
+            last_x = pX
+            last_y = pY
+        else:
+            send_desired(last_x, last_y)
+    elif(pY>150 or pY < 72):
+        if(damper_once):
+            Set_PID(0,0,30)
+            Send_Intersect_Flag(TRUE)
+            damper_once = 0
+            last_x = pX
+            last_y = pY
+        else:
+            send_desired(last_x, last_y)
+            last_x = pX
+            last_y = pY
+    else:
+        if(damper_once == 0):
+            Send_Intersect_Flag(FALSE)
+            Set_PID(default_P, default_I, default_D)
+            damper_once = 1
+
 def circIntersect(pX, pY):
-    global circX, circY, circR, start_time3, bOnce3
+    global circX, circY, circR, start_time3, bOnce3, damper_once
     distance = np.sqrt(np.square(circX-pX) + np.square(circY-pY))
     if distance < circR:
         Send_Intersect_Flag(TRUE)
@@ -202,19 +238,18 @@ def circIntersect(pX, pY):
             start_time3 = time.time()*1000
             bOnce3 = 0
         elif start_time3+time3_delay < time.time()*1000:
-            Send_Intersect_Flag(FALSE)
-            stDesired1.set("%s", "")
-            stDesired2.set("%s", "")
+            if (damper_once == 1):
+                Send_Intersect_Flag(FALSE)
+                stDesired1.set("%s", "")
+                stDesired2.set("%s", "")
             start_time3 = time.time()*1000
 
 def send_desired(desired_x,desired_y):
     global start_time2,start_time3, bOnce3  
     if start_time2+time2_delay < time.time()*1000:
-        print(desired_x, desired_y)
         left_length1, right_length1 = inverse_kinematic(desired_x, y_end-desired_y+4)
         stDesired1.set("%d", (left_length1-120)*2)
-        stDesired2.set("%d", (right_length1-120)*2)
-        #print(abs(left_length1-left_length),abs(right_length1-right_length))            
+        stDesired2.set("%d", (right_length1-120)*2)            
         ser.write(b"\xFB")
         value = [int((left_length-120))*2]
         length = bytes(value)
@@ -291,12 +326,16 @@ def ToggleCamera():
 def create_buttons(root):
     ttk.Button(root, text="Square", command=lambda: draw_constraint(Shape.Rectangle, default_sqX, default_sqY, default_sqL, default_sqH)).place(x=0,y=0)
     ttk.Button(root, text="Circle", command=lambda: draw_constraint(Shape.Circle, circX, circY, circR, 0)).place(x=75,y=0)
-    ttk.Button(root, text="Pause", command=lambda: pause_update()).place(x=500,y=0)
+    ttk.Button(root, text="Stop", command=lambda: Stop()).place(x=500,y=0)
     ttk.Button(root, text="Clear", command=lambda: clear()).place(x=575,y=0)
     ttk.Button(root, text="Wall", command=lambda: Set_PID(Wall_P, 0, Wall_D)).place(x=660,y=500)
     ttk.Button(root, text="Spring", command=lambda: Set_PID(Spring_P, 0, Spring_D)).place(x=740,y=500)
-    ttk.Button(root, text="Button", command=lambda: Set_PID(Damper_P, 0, Damper_D)).place(x=820,y=500)
+    ttk.Button(root, text="Damper", command=lambda: Set_PID(Damper_P, 0, Damper_D)).place(x=820,y=500)
     ttk.Button(root, text="Camera On/Off",command=lambda: ToggleCamera()).place(x=409,y=0)
+    ttk.Button(root, text="Eight", command=lambda: set_path(1)).place(x=333, y=0)
+    ttk.Button(root, text="Manual Pos", command=lambda: manual_position(1)).place(x=150, y=0)
+    ttk.Button(root, text="Star", command=lambda: set_path(2)).place(x=258, y=0)
+    ttk.Button(root, text="100%", command=lambda: set_path(3)).place(x=660, y=550)
 
 def create_labels(root):
     Label(root, text="Rx Count", font=("Courier", 18)).place(x=660,y=10)
@@ -371,17 +410,21 @@ def clear():
 def close(event):
     sys.exit()
 
+def Stop():
+    global bpath
+    init_regions()
+    bpath = 0
+    
 def on_click(event):
     global mouse_x, mouse_y, manual_pos, sqX, sqY, sqL, sqH
-    clear()
     mouse_x = (event.x/x_conv)-x_range/2
     mouse_y = event.y/y_conv
     manual_pos = 1
     sqX = sqY = sqL = sqH = 0
+    w.create_oval((mouse_x-1+x_range/2)*x_conv,(mouse_y+1)*y_conv,(mouse_x+1+x_range/2)*x_conv,(mouse_y-1)*y_conv)
     left_length, right_length = inverse_kinematic(mouse_x,mouse_y)
     left_length = (left_length-120)*2
     right_length = (right_length-120)*2
-    #print(left_length,right_length)
     ser.write(b"\xFB")
     value = [int(left_length)]
     angle = bytes(value)
@@ -391,6 +434,77 @@ def on_click(event):
     ser.write(angle)
     ser.write(b"\xFA")
     Send_Intersect_Flag(TRUE)
+
+def manual_position(flag):
+    Set_PID(30,0,3)
+    clear()
+
+path_point = 0
+path_length = 0
+bpath = 0;
+path = 1
+last_x2 = 0
+last_y2 = 0
+def draw_path(flag,x,y):
+    global last_x2, last_y2
+    if flag and not last_x2 == x and not last_y2 == y:
+        circle = w.create_oval((x-1.5+x_range/2)*x_conv, (y-1.5)*y_conv,\
+                       (x+1.5+x_range/2)*x_conv, (y+1.5)*y_conv, fill='blue')
+        last_x2 = x
+        last_y2 = y
+ 
+count = 0    
+def draw_path2(flag):
+    global x_c, y_c, count
+    count = count+1
+    if flag and count > 30:
+        x=x_c
+        y=y_c-4
+        circle = w.create_oval((x-1.5+x_range/2)*x_conv, (y_end-y-1.5)*y_conv,\
+                       (x+1.5+x_range/2)*x_conv, (y_end-y+1.5)*y_conv, fill='red')
+        count = 0
+def prescribed_path(path_x):
+    global path_point, manual_pos, bpath
+    path_length = len(path_x)
+    if(path_point < path_length):
+        go_to_pos(path_x[path_point][0], y_end-path_x[path_point][1])
+        draw_path2(1)
+        draw_path(1,path_x[path_point][0], y_end-path_x[path_point][1])
+    else:
+        Send_Intersect_Flag(TRUE)
+        w.delete(ALL)
+        path_point = 0
+
+
+
+def go_to_pos(x,y):
+    Send_Intersect_Flag(TRUE)
+    left_length, right_length = inverse_kinematic(x,y)
+    left_length = (left_length-120)*2
+    right_length = (right_length-120)*2
+    ser.write(b"\xFB")
+    value = [int(left_length)]
+    angle = bytes(value)
+    ser.write(angle)
+    value = [int(right_length)]
+    angle = bytes(value)
+    ser.write(angle)
+    ser.write(b"\xFA")     
+                   
+def set_path(p):
+    global bpath, path, curr_path
+    clear()
+    bpath = 1
+    path = p
+    if(path==1):
+        Set_PID(30,0,3)
+        curr_path = eight_path
+        prescribed_path(eight_path)
+    elif(path==2):
+        Set_PID(30,0,5)
+        curr_path = star_path
+        prescribed_path(star_path)
+    w.delete(ALL)
 
 def forward_kinematic(right_length, left_length):
     global x_c, y_c, base_length
@@ -446,7 +560,7 @@ def MsgHandler(Msgtype, data):
 
 def main():
     global state, success_count, x_c, y_c, MsgLength, MsgType, data, manual_pos, mouse_x, mouse_y, y_coordinate, x_coordinate
-    global start_time_manual, Camera_Toggle
+    global start_time_manual, Camera_Toggle, startrx, bpath, path_point, path_length, path
     #-----------------------------------------------------------------------------------------    
     #-------------------------Transfer Protocol State Machine---------------------------------
     if not Camera_Toggle:
@@ -556,20 +670,38 @@ def main():
     #-----------------------------------------------------------------------------------------     
     stRcvSuccess.set("%d", success_count)
     
-    if not manual_pos:
+    if not manual_pos and not bpath and startrx:
+        if(y_c > 0):
+            work_area(x_c, y_c)
+            pass
         if curr_shape == Shape.Rectangle:
             rectIntersect(x_c, y_c)
             pass
         elif curr_shape == Shape.Circle:
             circIntersect(x_c, y_c)
-    if manual_pos == 1:
+    if manual_pos == 1 and not bpath:
         if(abs(x_c-mouse_x) <2 and abs(y_c-(y_end-mouse_y+4)) < 2):
             if start_time_manual+time_delay_manual < time.time()*1000:
                 Send_Intersect_Flag(FALSE)
         else:
             start_time_manual = time.time()*1000
+    if bpath:
+        prescribed_path(curr_path)  
+        if(abs(x_c-curr_path[path_point][0])<2 and abs(y_c-4-curr_path[path_point][1])<2):
+            path_point = path_point + 1
+            prescribed_path(curr_path)                       
     root.after(1,main)
-    
+
+def init_regions():
+    w.create_rectangle(-1, -1, wWidth, wHeight, \
+                       stipple='gray25', fill = "red")
+    w.create_polygon((x_range/2)*x_conv,(y_end-200)*y_conv,abs(15+x_range/2)*x_conv,(y_end-175)*y_conv,(36+x_range/2)*x_conv,(y_end-150)*y_conv,\
+                      abs(90+x_range/2)*x_conv,(y_end-130)*y_conv,abs(65+x_range/2)*x_conv, (y_end-98)*y_conv,abs(36+x_range/2)*x_conv, (y_end-72)*y_conv,\
+                     (x_range/2)*x_conv,(y_end-46)*y_conv,abs(-36+x_range/2)*x_conv, (y_end-72)*y_conv,abs(-65+x_range/2)*x_conv, (y_end-98)*y_conv, \
+                     abs(-90+x_range/2)*x_conv,(y_end-130)*y_conv,\
+                     abs(-36+x_range/2)*x_conv, (y_end-150)*y_conv,abs(-15+x_range/2)*x_conv,(y_end-175)*y_conv, fill='white')
+    w.create_rectangle(abs(-36+x_range/2)*x_conv, (y_end-150)*y_conv,abs(36+x_range/2)*x_conv, (y_end-72)*y_conv, \
+                       stipple='gray75', fill = "lawngreen")    
 #-----------------------------------------------------------------------------------------    
 #-------------------------------------Initialization--------------------------------------
 #-----------------------------------------------------------------------------------------    
@@ -601,15 +733,7 @@ line4 = w.create_line(0,0,0,0)
 circle = w.create_oval(0,0,0,0)
 rectangle = w.create_rectangle(0,0,0,0)
 circle_C = w.create_oval(0,0,0,0)
-w.create_rectangle(-1, -1, wWidth, wHeight, \
-                   stipple='gray25', fill = "red")
-w.create_polygon((x_range/2)*x_conv,(y_end-200)*y_conv,abs(15+x_range/2)*x_conv,(y_end-175)*y_conv,(36+x_range/2)*x_conv,(y_end-150)*y_conv,\
-                  abs(90+x_range/2)*x_conv,(y_end-130)*y_conv,abs(65+x_range/2)*x_conv, (y_end-98)*y_conv,abs(36+x_range/2)*x_conv, (y_end-72)*y_conv,\
-                 (x_range/2)*x_conv,(y_end-46)*y_conv,abs(-36+x_range/2)*x_conv, (y_end-72)*y_conv,abs(-65+x_range/2)*x_conv, (y_end-98)*y_conv, \
-                 abs(-90+x_range/2)*x_conv,(y_end-130)*y_conv,\
-                 abs(-36+x_range/2)*x_conv, (y_end-150)*y_conv,abs(-15+x_range/2)*x_conv,(y_end-175)*y_conv, fill='white')
-w.create_rectangle(abs(-36+x_range/2)*x_conv, (y_end-150)*y_conv,abs(36+x_range/2)*x_conv, (y_end-72)*y_conv, \
-                   stipple='gray75', fill = "lawngreen")
+init_regions()
 #-----------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------
 entryX = Entry(root, width = 5)
@@ -651,7 +775,16 @@ args = vars(ap.parse_args())
 greenLower = (0,255,86)
 greenUpper = (255, 255, 255)
 pts = deque(maxlen=args["buffer"])
- 
+
+eight_path = [[0,150],[-7,145],[-15,140],[-18,135],[-20, 130],[-18,125],[-15,120],[-7,115],[0,110],[7,105],[15,100],[18,95],\
+              [20,90],[18,85],[15,80],[7,75],[0,70],[-7,75],\
+              [-15,80],[-18,85],[-20,90],[-18,95],[-15,100],[-7,105],[0,110],[7,115],[15,120],[18,125],[20,130],\
+              [18,135],[15,140],[7,145],[0,150]]
+
+star_path = [[0,150],[-15,130],[-35,130],[-20,110],[-35,85],[0,100],[35,85],[20,110],[35,130],[15,130],[0,150]]
+
+curr_path = eight_path
+
 draw_constraint(Shape.Rectangle, default_sqX, default_sqY, default_sqL, default_sqH)
 root.bind('<Escape>', close)
 root.bind('<Return>', entry_callback)
