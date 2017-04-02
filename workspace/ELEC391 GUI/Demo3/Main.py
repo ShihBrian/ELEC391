@@ -18,6 +18,8 @@ import argparse
 import imutils
 import cv2
 from PIL import ImageTk, Image
+from pyimagesearch.shapedetector import ShapeDetector
+from operator import xor
 #==============Plot Globals===============#
 wHeight = 508
 wWidth = 501
@@ -85,7 +87,7 @@ default_sqX=-20
 default_sqY=90
 default_sqL=40
 default_sqH=40
-circR = 20
+circR = 10
 circX = 0
 circY = 100
 curr_shape = Shape.Rectangle
@@ -231,6 +233,7 @@ def circIntersect(pX, pY):
         Send_Intersect_Flag(TRUE)
         desired_x = circX + circR*((pX-circX)/np.sqrt((pX-circX)**2+(pY-circY)**2))
         desired_y = circY + circR*((pY-circY)/np.sqrt((pX-circX)**2+(pY-circY)**2))
+        print(desired_x, desired_y)
         left_length, right_length = inverse_kinematic(desired_x, desired_y)
         send_desired(desired_x, desired_y)
     else:
@@ -316,14 +319,19 @@ def ToggleCamera():
     global Camera_Toggle, camera
     if Camera_Toggle == 0:
         Camera_Toggle = 1
+        clear()
+        Set_PID(40,0,5)
         if not args.get("video", False):
             camera = cv2.VideoCapture(1)
     else:
         Camera_Toggle = 0
         camera.release()
         cv2.destroyAllWindows()
+        Send_Intersect_Flag(FALSE)
+        clear()
     
 def create_buttons(root):
+    global frame
     ttk.Button(root, text="Square", command=lambda: draw_constraint(Shape.Rectangle, default_sqX, default_sqY, default_sqL, default_sqH)).place(x=0,y=0)
     ttk.Button(root, text="Circle", command=lambda: draw_constraint(Shape.Circle, circX, circY, circR, 0)).place(x=75,y=0)
     ttk.Button(root, text="Stop", command=lambda: Stop()).place(x=500,y=0)
@@ -335,7 +343,8 @@ def create_buttons(root):
     ttk.Button(root, text="Eight", command=lambda: set_path(1)).place(x=333, y=0)
     ttk.Button(root, text="Manual Pos", command=lambda: manual_position(1)).place(x=150, y=0)
     ttk.Button(root, text="Star", command=lambda: set_path(2)).place(x=258, y=0)
-    ttk.Button(root, text="100%", command=lambda: set_path(3)).place(x=660, y=550)
+    ttk.Button(root, text="100%", command=lambda: set_path(4)).place(x=660, y=550)
+    ttk.Button(root, text="Custom Path", command=lambda: set_path(3)).place(x=660, y=600)
 
 def create_labels(root):
     Label(root, text="Rx Count", font=("Courier", 18)).place(x=660,y=10)
@@ -401,43 +410,68 @@ def pause_update():
     ser.write(PauseByte)
 
 def clear():
-    global sqX, sqY, sqH, sqL
+    global sqX, sqY, sqH, sqL, manual_pos, custom_path
+    #custom_path = []
     sqX = sqY = 0
+    manual_pos = 0
     sqH = sqL = 0
-    w.delete(rectangle)
-    w.delete(circle_C)
+    w.delete(ALL)
+    init_regions()
    
 def close(event):
+    Stop()
+    Send_Intersect_Flag(FALSE)
+    clear()
     sys.exit()
 
 def Stop():
-    global bpath
+    global bpath, custom_path
+    custom_path = []
     init_regions()
     bpath = 0
     
 def on_click(event):
     global mouse_x, mouse_y, manual_pos, sqX, sqY, sqL, sqH
-    mouse_x = (event.x/x_conv)-x_range/2
-    mouse_y = event.y/y_conv
-    manual_pos = 1
-    sqX = sqY = sqL = sqH = 0
-    w.create_oval((mouse_x-1+x_range/2)*x_conv,(mouse_y+1)*y_conv,(mouse_x+1+x_range/2)*x_conv,(mouse_y-1)*y_conv)
-    left_length, right_length = inverse_kinematic(mouse_x,mouse_y)
-    left_length = (left_length-120)*2
-    right_length = (right_length-120)*2
-    ser.write(b"\xFB")
-    value = [int(left_length)]
-    angle = bytes(value)
-    ser.write(angle)
-    value = [int(right_length)]
-    angle = bytes(value)
-    ser.write(angle)
-    ser.write(b"\xFA")
-    Send_Intersect_Flag(TRUE)
+    if manual_pos:
+        mouse_x = (event.x/x_conv)-x_range/2
+        mouse_y = event.y/y_conv
+        sqX = sqY = sqL = sqH = 0
+        w.create_oval((mouse_x-1+x_range/2)*x_conv,(mouse_y+1)*y_conv,(mouse_x+1+x_range/2)*x_conv,(mouse_y-1)*y_conv)
+        left_length, right_length = inverse_kinematic(mouse_x,mouse_y)
+        left_length = (left_length-120)*2
+        right_length = (right_length-120)*2
+        ser.write(b"\xFB")
+        value = [int(left_length)]
+        angle = bytes(value)
+        ser.write(angle)
+        value = [int(right_length)]
+        angle = bytes(value)
+        ser.write(angle)
+        ser.write(b"\xFA")
+        Send_Intersect_Flag(TRUE)
 
+
+custom_path = []
+def on_drag(event):
+    global custom_path, drag_timer
+    if not manual_pos:
+        x = (event.x/x_conv)-x_range/2
+        y = y_end-event.y/y_conv
+        pos = [int(x),int(y+4)]
+        if not custom_path:
+            custom_path.append(pos)
+            circle = w.create_oval((x-1.5+x_range/2)*x_conv, (y_end-y-1.5)*y_conv,\
+                           (x+1.5+x_range/2)*x_conv, (y_end-y+1.5)*y_conv, fill='red')
+        elif not(custom_path[-1][0] == pos[0] and custom_path[-1][1] == pos[1]):
+            custom_path.append(pos)
+            circle = w.create_oval((x-1.5+x_range/2)*x_conv, (y_end-y-1.5)*y_conv,\
+                           (x+1.5+x_range/2)*x_conv, (y_end-y+1.5)*y_conv, fill='red')
+                  
 def manual_position(flag):
-    Set_PID(30,0,3)
+    global manual_pos
     clear()
+    manual_pos = 1
+    Set_PID(50,0,5)
 
 path_point = 0
 path_length = 0
@@ -453,29 +487,37 @@ def draw_path(flag,x,y):
         last_x2 = x
         last_y2 = y
  
-count = 0    
+count = 0  
+path_list = []  
 def draw_path2(flag):
-    global x_c, y_c, count
+    global x_c, y_c, count, path_list
     count = count+1
     if flag and count > 30:
         x=x_c
         y=y_c-4
         circle = w.create_oval((x-1.5+x_range/2)*x_conv, (y_end-y-1.5)*y_conv,\
                        (x+1.5+x_range/2)*x_conv, (y_end-y+1.5)*y_conv, fill='red')
+        path_list.insert(0,circle)
+        if(len(path_list)>100):
+            w.delete(path_list[-1])
+            path_list.pop()
         count = 0
+        
 def prescribed_path(path_x):
     global path_point, manual_pos, bpath
     path_length = len(path_x)
+    if path_point == 0:
+        w.delete(ALL)
     if(path_point < path_length):
         go_to_pos(path_x[path_point][0], y_end-path_x[path_point][1])
         draw_path2(1)
         draw_path(1,path_x[path_point][0], y_end-path_x[path_point][1])
     else:
         Send_Intersect_Flag(TRUE)
-        w.delete(ALL)
         path_point = 0
-
-
+        go_to_pos(path_x[0][0], y_end-path_x[0][1])
+        time.sleep(1)
+        w.delete(ALL)
 
 def go_to_pos(x,y):
     Send_Intersect_Flag(TRUE)
@@ -497,14 +539,35 @@ def set_path(p):
     bpath = 1
     path = p
     if(path==1):
-        Set_PID(30,0,3)
+        Set_PID(50,0,3)
+        go_to_pos(eight_path[0][0], y_end-eight_path[0][1])
+        time.sleep(0.7)
         curr_path = eight_path
         prescribed_path(eight_path)
+        w.delete(ALL)
     elif(path==2):
-        Set_PID(30,0,5)
+        Set_PID(50,0,3)
+        go_to_pos(star_path[0][0], y_end-star_path[0][1])
+        time.sleep(0.7)
         curr_path = star_path
         prescribed_path(star_path)
-    w.delete(ALL)
+        w.delete(ALL)
+    elif(path==3):
+        Set_PID(55,0,5)
+        #go_to_pos(pts[0][0]*x_scale+(-36), pts[0][1]*y_scale + 72)
+        #o_to_pos(custom_path[0][0], y_end-custom_path[0][1])
+        
+        time.sleep(0.7)
+        curr_path = custom_path
+        prescribed_path(custom_path)
+        w.delete(ALL)
+    elif(path==4):
+        Set_PID(30,0,5)
+        go_to_pos(E_path[0][0], y_end-E_path[0][1])
+        time.sleep(0.7)
+        curr_path = E_path
+        prescribed_path(custom_path)
+        w.delete(ALL)       
 
 def forward_kinematic(right_length, left_length):
     global x_c, y_c, base_length
@@ -558,114 +621,131 @@ def MsgHandler(Msgtype, data):
         if (first_start):
             startrx = 1;
 
+
+camera_count = 0
+start_delay = 0
+frame = 0
 def main():
     global state, success_count, x_c, y_c, MsgLength, MsgType, data, manual_pos, mouse_x, mouse_y, y_coordinate, x_coordinate
-    global start_time_manual, Camera_Toggle, startrx, bpath, path_point, path_length, path
+    global start_time_manual, Camera_Toggle, startrx, bpath, path_point, path_length, path, camera_count, start_delay, frame
     #-----------------------------------------------------------------------------------------    
     #-------------------------Transfer Protocol State Machine---------------------------------
-    if not Camera_Toggle:
-        if ser.inWaiting()>0:
-            if state == States.RxStart: #waiting to receive startbyte
-                x = int(ser.read(2),16)
-                if x == Startbyte: #received startbyte
-                    state = States.RxMsgType
-            elif state == States.RxMsgType: #receive msg type, 1 byte
-                x = int(ser.read(1),16)
-                if x == 1:
-                    MsgType = eMsgType.encoderPosLeft
-                elif x == 2:
-                    MsgType = eMsgType.encoderPosRight
-                elif x == 3:
-                    MsgType = eMsgType.desiredLeft
-                elif x == 4:
-                    MsgType = eMsgType.desiredRight
-                elif x == 5:
-                    MsgType = eMsgType.debug
-                elif x == 6:
-                    MsgType = eMsgType.start
-                state = States.RxMsgLength
-            elif state == States.RxMsgLength: #receive message length, 1 byte
-                x = int(ser.read(1),16)
-                MsgLength = x
-                if(MsgLength): #if msg length is 0, rx fail and reset to wait for start
-                    state = States.RxMsg
-                else:
-                    state = States.RxStart
-            elif state == States.RxMsg: #receive msg length bytes of data 
-                data = int(ser.read(MsgLength),16)
-                state = States.RxEnd
-            elif state == States.RxEnd: #wait for endbyte, if received proceed to handle message, else go back to start          
-                x = int(ser.read(2),16)
-                if x == EndByte: #if endbyte is received then update x,y coordinate
-                    success_count = success_count + 1
-                    MsgHandler(MsgType, data)
-                #else discard bytes and change state back to waiting for startbyte
-                state = States.RxStart         
+    if ser.inWaiting()>0:
+        if state == States.RxStart: #waiting to receive startbyte
+            x = int(ser.read(2),16)
+            if x == Startbyte: #received startbyte
+                state = States.RxMsgType
+        elif state == States.RxMsgType: #receive msg type, 1 byte
+            x = int(ser.read(1),16)
+            if x == 1:
+                MsgType = eMsgType.encoderPosLeft
+            elif x == 2:
+                MsgType = eMsgType.encoderPosRight
+            elif x == 3:
+                MsgType = eMsgType.desiredLeft
+            elif x == 4:
+                MsgType = eMsgType.desiredRight
+            elif x == 5:
+                MsgType = eMsgType.debug
+            elif x == 6:
+                MsgType = eMsgType.start
+            state = States.RxMsgLength
+        elif state == States.RxMsgLength: #receive message length, 1 byte
+            x = int(ser.read(1),16)
+            MsgLength = x
+            if(MsgLength): #if msg length is 0, rx fail and reset to wait for start
+                state = States.RxMsg
+            else:
+                state = States.RxStart
+        elif state == States.RxMsg: #receive msg length bytes of data 
+            data = int(ser.read(MsgLength),16)
+            state = States.RxEnd
+        elif state == States.RxEnd: #wait for endbyte, if received proceed to handle message, else go back to start          
+            x = int(ser.read(2),16)
+            if x == EndByte: #if endbyte is received then update x,y coordinate
+                success_count = success_count + 1
+                MsgHandler(MsgType, data)
+            #else discard bytes and change state back to waiting for startbyte
+            state = States.RxStart         
     #-----------------------------------------------------------------------------------------    
     #-----------------------------OpenCV Object Tracking--------------------------------------
     if Camera_Toggle:
-        # grab the current frame
-        (grabbed, frame) = camera.read()
-        # if we are viewing a video and we did not grab a frame,
-        # then we have reached the end of the video
-        if args.get("video") and not grabbed:
-            print("Asds")
-     
-        # resize the frame, blur it, and convert it to the HSV
-        # color space
-        frame = imutils.resize(frame, width=600)
-        # blurred = cv2.GaussianBlur(frame, (11, 11), 0)
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-     
-        # construct a mask for the color "green", then perform
-        # a series of dilations and erosions to remove any small
-        # blobs left in the mask
-        mask = cv2.inRange(hsv, greenLower, greenUpper)
-        mask = cv2.erode(mask, None, iterations=2)
-        mask = cv2.dilate(mask, None, iterations=2)
-        # find contours in the mask and initialize the current
-        # (x, y) center of the ball
-        cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE)[-2]
-        center = None
-     
-        # only proceed if at least one contour was found
-        if len(cnts) > 0:
-            # find the largest contour in the mask, then use
-            # it to compute the minimum enclosing circle and
-            # centroid
-            c = max(cnts, key=cv2.contourArea)
-            ((x, y), radius) = cv2.minEnclosingCircle(c)
-            M = cv2.moments(c)
-            center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
-     
-            # only proceed if the radius meets a minimum size
-            if radius > 10:
-                # draw the circle and centroid on the frame,
-                # then update the list of tracked points
-                cv2.circle(frame, (int(x), int(y)), int(radius),
-                    (0, 255, 255), 2)
-                cv2.circle(frame, center, 5, (0, 0, 255), -1)
-     
-        # update the points queue
-        pts.appendleft(center)
-        if(center != None):
-            draw_point((600-center[0])/x_conv-x_range/2, center[1]/y_conv)
-            x = ((600-center[0])/x_conv)-x_range/2
-            y = center[1]/y_conv
-            stXCoord.set("%.1lf", x)
-            stYCoord.set("%.1lf", y)            
-        for i in range(1, len(pts)):
-            # if either of the tracked points are None, ignore
-            # them
-            if pts[i - 1] is None or pts[i] is None:
-                continue
-     
-            # otherwise, compute the thickness of the line and
-            # draw the connecting lines    
-            #thickness = int(np.sqrt(args["buffer"] / float(i + 1)) * 2.5)
-            cv2.line(frame, pts[i - 1], pts[i], (0, 0, 255), 5)    
-        cv2.imshow("Frame", frame)
+        if(start_delay > 299):
+            draw_path2(1)
+        if camera_count > 10:
+            # grab the current frame
+            (grabbed, frame) = camera.read()
+        
+            # if we are viewing a video and we did not grab a frame,
+            # then we have reached the end of the video
+            if args.get("video") and not grabbed:
+                print("Asds")
+         
+            # resize the frame, blur it, and convert it to the HSV
+            # color space
+            frame = imutils.resize(frame, width=600)
+            # blurred = cv2.GaussianBlur(frame, (11, 11), 0)
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+         
+            # construct a mask for the color "green", then perform
+            # a series of dilations and erosions to remove any small
+            # blobs left in the mask
+            mask = cv2.inRange(hsv, greenLower, greenUpper)
+            mask = cv2.erode(mask, None, iterations=2)
+            mask = cv2.dilate(mask, None, iterations=2)
+            # find contours in the mask and initialize the current
+            # (x, y) center of the ball
+            cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE)[-2]
+            center = None
+         
+            # only proceed if at least one contour was found
+            if len(cnts) > 0:
+                # find the largest contour in the mask, then use
+                # it to compute the minimum enclosing circle and
+                # centroid
+                c = max(cnts, key=cv2.contourArea)
+                ((x, y), radius) = cv2.minEnclosingCircle(c)
+                M = cv2.moments(c)
+                center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
+         
+                # only proceed if the radius meets a minimum size
+                if radius > 10:
+                    # draw the circle and centroid on the frame,
+                    # then update the list of tracked points
+                    cv2.circle(frame, (int(x), int(y)), int(radius),
+                        (0, 255, 255), 2)
+                    cv2.circle(frame, center, 5, (0, 0, 255), -1)
+         
+            # update the points queue
+            if center is not None:
+                manual_pos = 1
+                if (start_delay > 199):
+                    pts.appendleft(center)
+                    go_to_pos((pts[0][0]*x_scale+(-36)),y_end-((450-pts[0][1])*y_scale+72))
+            if(center != None):
+                pass
+                #draw_point((600-center[0])/x_conv-x_range/2, center[1]/y_conv)
+                #x = ((600-center[0])/x_conv)-x_range/2
+                #y = center[1]/y_conv
+                #stXCoord.set("%.1lf", x)
+                #stYCoord.set("%.1lf", y)            
+            for i in range(1, len(pts)):
+                # if either of the tracked points are None, ignore
+                # them
+                if pts[i - 1] is None or pts[i] is None:
+                    continue
+         
+                # otherwise, compute the thickness of the line and
+                # draw the connecting lines    
+                #thickness = int(np.sqrt(args["buffer"] / float(i + 1)) * 2.5)
+                if (start_delay > 199):
+                    cv2.line(frame, pts[i - 1], pts[i], (0, 0, 255), 5)  
+            cv2.imshow("Frame", frame)
+            camera_count =0
+        camera_count +=1
+        if(start_delay < 300):
+            start_delay +=1
     #-----------------------------------------------------------------------------------------
     #-----------------------------------------------------------------------------------------     
     stRcvSuccess.set("%d", success_count)
@@ -699,12 +779,98 @@ def init_regions():
                       abs(90+x_range/2)*x_conv,(y_end-130)*y_conv,abs(65+x_range/2)*x_conv, (y_end-98)*y_conv,abs(36+x_range/2)*x_conv, (y_end-72)*y_conv,\
                      (x_range/2)*x_conv,(y_end-46)*y_conv,abs(-36+x_range/2)*x_conv, (y_end-72)*y_conv,abs(-65+x_range/2)*x_conv, (y_end-98)*y_conv, \
                      abs(-90+x_range/2)*x_conv,(y_end-130)*y_conv,\
-                     abs(-36+x_range/2)*x_conv, (y_end-150)*y_conv,abs(-15+x_range/2)*x_conv,(y_end-175)*y_conv, fill='white')
+                     abs(-36+x_range/2)*x_conv, (y_end-150)*y_conv,abs(-15+x_range/2)*x_conv,(y_end-175)*y_conv, fill='yellow', stipple='gray25')
     w.create_rectangle(abs(-36+x_range/2)*x_conv, (y_end-150)*y_conv,abs(36+x_range/2)*x_conv, (y_end-72)*y_conv, \
                        stipple='gray75', fill = "lawngreen")    
 #-----------------------------------------------------------------------------------------    
 #-------------------------------------Initialization--------------------------------------
 #-----------------------------------------------------------------------------------------    
+
+def get_distance(points, cornerPoints):
+    points_length = len(points)
+    if (points_length == 4):
+        for i in range(0,4):
+            x1,y1 = points[i]
+            x2,y2 = cornerPoints[i]
+            d1 = x2 - x1
+            d2 = y2 - y1
+            distance = math.sqrt(d1**2 + d2**2)
+            if distance > 1:
+                return True
+    return False
+
+centerPoints = []
+cornerPoints = []
+MIN_THRESH = 0
+cX = 0
+cY = 0
+shape = 0
+def ConstraintDetector(image):
+    global centerPoints, cornerPoints, circX, circY,shape,cX,cY,circR
+    done = 0
+    Send_Intersect_Flag(FALSE)
+    while 1:
+        frame_to_thresh = cv2.cvtColor(cv2.medianBlur(cv2.GaussianBlur(image,(5, 5), 0),5), cv2.COLOR_BGR2HSV)
+        frame_to_thresh = cv2.bilateralFilter(frame_to_thresh,0,4,8,2)
+        frame_to_thresh = cv2.erode(frame_to_thresh, (5,5),iterations=2)
+    
+        v1_min, v2_min, v3_min, v1_max, v2_max, v3_max = 0,0,200,255,255,255
+        thresh = cv2.inRange(frame_to_thresh, (v1_min, v2_min, v3_min), (v1_max, v2_max, v3_max))
+        cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE)
+        cnts = cnts[0] if imutils.is_cv2() else cnts[1]
+        sd = ShapeDetector()
+        
+        for c in cnts:
+            # compute the center of the contour
+            M = cv2.moments(c)
+            if cv2.contourArea(c) > MIN_THRESH:
+                # process the contour
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+                shape = sd.detect(c)
+                tup = cX, cY
+                if not centerPoints:
+                    centerPoints.append(tup)
+                elif (tup != centerPoints[-1]):
+                    centerPoints.append(tup) #send to haptic interface for center
+            points = []
+            done = 1
+            corners = cv2.goodFeaturesToTrack(thresh,4,0.05,25)
+            if corners is not None:
+                for i in corners:
+                    pt = i[0][0],i[0][1]
+                    if not points:
+                        points.append(pt)
+                    elif (pt != points[-1]):
+                        points.append(pt)
+                        cv2.circle(image,(pt),5,255,-1)
+            for i in range(0,4):
+                if not cornerPoints:
+                    cornerPoints.append(points)
+                elif (get_distance(points, cornerPoints[-1])):
+                    cornerPoints.append(points) #send to haptic interface for corners of shape
+            
+            # draw the contour and center of the shape on the image
+            cv2.drawContours(image, [c], -1, (0, 255, 0), 2) # draw contours on the image
+            cv2.putText(image, shape, (cX, cY), cv2.FONT_HERSHEY_SIMPLEX,
+                0.5, (255, 255, 255), 2)
+            cv2.circle(image, (cX, cY), 7, (0, 0, 255), -1) # draw center circle on the image
+            cv2.putText(image, "center", (cX - 20, cY - 20),    #draw center text on the image
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            
+            if(shape == 'circle'):
+                circX, circY = cX*x_scale-36, (450-cY)*y_scale+72
+                circR = 5
+                print(cX, cY,circX, circY)
+                
+        if done:
+            ToggleCamera()
+            draw_constraint(Shape.Circle, circX, circY, circR, 0)
+            break 
+
+x_scale = 72/600
+y_scale = 78/450
 ser = init_serial()  
 root = init_window()
 create_buttons(root)
@@ -772,9 +938,9 @@ args = vars(ap.parse_args())
 # define the lower and upper boundaries of the "green"
 # ball in the HSV color space, then initialize the
 # list of tracked points
-greenLower = (0,255,86)
-greenUpper = (255, 255, 255)
-pts = deque(maxlen=args["buffer"])
+greenLower = (24,103,70)
+greenUpper = (157, 255, 255)
+pts = deque(maxlen=250)
 
 eight_path = [[0,150],[-7,145],[-15,140],[-18,135],[-20, 130],[-18,125],[-15,120],[-7,115],[0,110],[7,105],[15,100],[18,95],\
               [20,90],[18,85],[15,80],[7,75],[0,70],[-7,75],\
@@ -789,6 +955,7 @@ draw_constraint(Shape.Rectangle, default_sqX, default_sqY, default_sqL, default_
 root.bind('<Escape>', close)
 root.bind('<Return>', entry_callback)
 w.bind('<Button-1>', on_click)
+w.bind('<B1-Motion>', on_drag)
 root.after(1,main)
 root.mainloop()
 
