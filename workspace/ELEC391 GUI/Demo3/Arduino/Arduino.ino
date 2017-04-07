@@ -47,9 +47,9 @@ enum MsgType{
 
 /*===============================*/
 //PID globals
-float Kp = 45;
+float Kp = 120;
 float Ki = 0;
-float Kd = 0;
+float Kd = 170;
 double DesiredLeft,PIDOutputLeft;
 double DesiredRight,PIDOutputRight;
 double ActualLeft = 0;
@@ -72,7 +72,8 @@ unsigned long tickms = 10;
 unsigned long curr_tick;
 unsigned long curr_time;
 unsigned long start_time = millis();
-bool pause = false;
+bool ma_seven = true;
+bool ma_two = false;
 bool intersect = false;
 
 void setup() {
@@ -97,6 +98,7 @@ void setup() {
   delay(1000);
   analogWrite(BWPinL, 255);
   analogWrite(BWPinR, 255);
+  delay(500);
   pinMode(13, OUTPUT);
   digitalWrite(13, LOW); // /RST resets the internal counter between runs
   delay(10);
@@ -110,31 +112,27 @@ void setup() {
   Send_Message(start,1);
   delay(500);
   all_off();
-  delay(500);
 }
-int Kp1 = 0;
-int Kp2= 0;
+
 void loop() {
 #if !defined(DEBUG) && !defined(LOCAL_OUTPUT) //main loop 
   static int tries = 0;
   curr_tick = millis();
-  if(!pause){
-    if(curr_tick-tickms >= tick_start){ //run loop every tickms 
-      ISR_Counter(); //get new encoder positions
-      if((previousPosLeft != encoderPosLeft)||(previousPosRight != encoderPosRight)){
-        if(tries == 2){ //send message every second encoderPosLeft change
-          Send_Message(encoderleft, encoderPosLeft); 
-          Send_Message(encoderright, encoderPosRight);
-          previousPosLeft = encoderPosLeft;
-          previousPosRight = encoderPosRight;
-          tries = 0;
-        }
-        else{
-          tries++;
-        }
+  if(curr_tick-tickms >= tick_start){ //run loop every tickms 
+    ISR_Counter(); //get new encoder positions
+    if((previousPosLeft != encoderPosLeft)||(previousPosRight != encoderPosRight)){
+      if(tries == 1){ //send message every second encoderPosLeft change
+        Send_Message(encoderleft, encoderPosLeft); 
+        Send_Message(encoderright, encoderPosRight);
+        previousPosLeft = encoderPosLeft;
+        previousPosRight = encoderPosRight;
+        tries = 0;
       }
-      tick_start = millis();
+      else{
+        tries++;
+      }
     }
+    tick_start = millis();
   }
 
   if(Serial.available()>0) {
@@ -166,13 +164,21 @@ void loop() {
       all_off();   
     }
     else if(incomingByte == 0xFE){
-      pause = !pause;
+      ma_seven = true;
+      ma_two = false;
+    }
+    else if(incomingByte == 0xED){
+      ma_two = true;
+      ma_seven = false;
+    }
+    else if(incomingByte == 0xEC){
+      ma_two = false;
+      ma_seven = false;
     }
     else if(incomingByte == 0xFC){
       rxPID = true;
     }
-
-    if(incomingByte == 0xEF){
+    else if(incomingByte == 0xEF){
       goto_middle();
     }
     
@@ -232,15 +238,19 @@ void loop() {
 }
 
 void goto_middle(){
-  while(abs(encoderPosLeft-80)>1 || abs(encoderPosRight-80)>1){
+  PID1.SetTunings(255,0,10);
+  PID2.SetTunings(255,0,10);  
+  while(abs(encoderPosLeft-90)>2 || abs(encoderPosRight-90)>2){
     ISR_Counter();
-    PID_Output(1, 80,80); 
+    PID_Output(1, 90,90); 
   }
   int i =0;
-  for(i;i<2000;i++){
+  for(i;i<1000;i++){
     ISR_Counter();
-    PID_Output(1, 80,80);  
+    PID_Output(1, 90,90);  
   }
+  PID1.SetTunings(Kp,Ki,Kd);
+  PID2.SetTunings(Kp,Ki,Kd);  
   all_off();
   Send_Message(start,1);
 }
@@ -255,6 +265,21 @@ void Local_Out(){
     previousPosRight = encoderPosRight;
   }  
 }
+
+int MAleft[10];
+int lastpwml = 0;
+int lastpwml2 = 0;
+int lastpwml3 = 0;
+int lastpwml4 = 0;
+int lastpwml5 = 0;
+int lastpwml6 = 0;
+int lastpwmr = 0;
+int lastpwmr2 = 0;
+int lastpwmr3 = 0;
+int lastpwmr4 = 0;
+int lastpwmr5 = 0;
+int lastpwmr6 = 0;
+int MAright[10];
 void PID_Output(bool flag, int DesiredL, int DesiredR){
     int difference = 0;
     if(encoderPosLeft > DesiredL){
@@ -281,22 +306,44 @@ void PID_Output(bool flag, int DesiredL, int DesiredR){
     }
     PID1.Compute();
     PID2.Compute();    
-    static int lastpwmleft= 0;
-    static int lastpwmleft2= 0;
-    static int lastpwmright = 0;
-    static int lastpwmright2= 0;
+    static int count = 0;
     //Run PID computation
     if(flag){
+      if(ma_seven){
+        PIDOutputLeft = (lastpwml+lastpwml2+lastpwml3+lastpwml4+lastpwml5+lastpwml6+PIDOutputLeft)/7;
+        lastpwml6 = lastpwml5;
+        lastpwml5 = lastpwml4;
+        lastpwml4 = lastpwml3;
+        lastpwml3 = lastpwml2;
+        lastpwml2 = lastpwml;
+        lastpwml = PIDOutputLeft;
+        PIDOutputRight = (lastpwmr+lastpwmr2+lastpwmr3+lastpwmr4+lastpwmr5+lastpwmr6+PIDOutputRight)/7;
+        lastpwmr6 = lastpwmr5;
+        lastpwmr5 = lastpwmr4;
+        lastpwmr4 = lastpwmr3;
+        lastpwmr3 = lastpwmr2;
+        lastpwmr2 = lastpwmr;
+        lastpwmr = PIDOutputRight;
+      }
+      else if(ma_two){
+        PIDOutputLeft = (lastpwml+PIDOutputLeft)/2;
+        lastpwml2 = lastpwml;
+        lastpwml = PIDOutputLeft;
+        PIDOutputRight = (lastpwmr+PIDOutputRight)/2;
+        lastpwmr2 = lastpwmr;
+        lastpwmr = PIDOutputRight;        
+      }
       //Turn on pin according to direction and PID output. Limit to 255 
       if (directionleft == FORWARD){
-        //Serial.print("Forward");
-        //Serial.println(PIDOutputLeft);
         analogWrite(FWPinL, PIDOutputLeft);
         digitalWrite(BWPinL, LOW);
+        if(count > 50){
+          //Send_Message(debug, PIDOutputLeft);
+          count = 0;
+        }
+        count++;
       }
       else{
-       // Serial.print("Backward");
-        //Serial.println(PIDOutputLeft);
         analogWrite(BWPinL,PIDOutputLeft);
         digitalWrite(FWPinL, LOW);
       }
